@@ -1,0 +1,182 @@
+---
+title: "Example BO"
+output: html_notebook
+---
+
+
+```{r}
+library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+source("../script/R/odin-sim.R")
+```
+
+## Create ground truth
+
+```{r}
+
+xtrue <- c(0.7, 0.3)
+beta_range <- c(0.2, 0.5)
+gamma_range <- c(0.1, 0.4)
+strue <- 50
+
+ytrue <- run_sim(list(seed = strue, 
+                      par = xtrue, 
+                      param_bounds = rbind(beta_range, gamma_range),
+                      nsteps = 100,
+                      return_trajectory = F))
+
+ytrue_full <- run_sim(list(seed = strue, 
+                           par = xtrue, 
+                           param_bounds = rbind(beta_range, gamma_range),
+                           nsteps = 100,
+                           return_trajectory = T))
+ytrue_full <- ytrue_full$n_SI
+```
+
+```{r}
+ytrue_err <- run_sim_err(list(seed = strue, 
+                              par = xtrue, 
+                              param_bounds = rbind(beta_range, gamma_range),
+                              nsteps = 100,
+                              ytrue_vec = ytrue_full))
+ytrue_err
+```
+
+```{r}
+ytrue_err2 <- run_sim_err(list(seed = 10, 
+                              par = c(0.5, 0.5), 
+                              param_bounds = rbind(beta_range, gamma_range),
+                              nsteps = 100,
+                              ytrue_vec = ytrue_full))
+ytrue_err2
+```
+
+## BO
+
+#### Experimental settings (to be passed to batch R experiment code)
+
+```{r}
+bo_experiment_seed <- 23
+init_npar <- 10
+nrep <- 10
+sim_budget <- 200
+grid_npar <- 100
+nTS_samp <- 30
+nTS_iter <- 20
+p <- 2
+```
+
+#### Initial set of simulations (same for all surrogates + TS)
+
+```{r}
+
+p <- 2
+X_01 <- randomLHS(n = init_npar, k = p)
+s <- 1:nrep
+Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
+
+y <- rep(NA, init_npar*nrep)
+k <- 1
+for (ii in 1:init_npar){
+  for (seed in s){
+    y[k] <- run_sim_err(seed = seed, params = Xs_01[k, 1:p], 
+                      param_bounds = rbind(beta_range, gamma_range), 
+                      ytrue_vec = ytrue_full)
+    k <- k + 1
+  }
+}
+```
+
+
+#### homGP surrogate
+
+```{r}
+y_std <- scale(y)
+center <- attr(y_std, "scaled:center")
+sd <- attr(y_std, "scaled:scale")
+
+f <- fitGP(Xs_01[, 1:p], y_std, GP_type = "hom", known = list(beta0 = 0), covtype = "Matern5_2")
+```
+
+```{r}
+f <- 
+TSBatchBO(init_npar, nrep, p, sim_budget = 200, 
+          grid_npar = 100, nTS_samp = 30, nTS_iter = 20,
+          adaptive = T, ytrue = ytrue_full, GP_type = "CRNGP",
+          sim_func = run_sim_err, exp_seed = bo_experiment_seed)
+```
+
+```{r}
+create_grid_CRNGP <- function(nparam, nrep, model, Ytrue, err_sig, prop_sig = 0.3){
+  
+  p <- ncol(model$X0)  # input dimension
+  
+  # lhs design to initialize
+  s <- 1:nrep
+  Xgrid_01 <- randomLHS(n = nparam, k = p)
+  Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], rep(s, nparam))
+  
+  # calculate importance weights
+  w <- loglik_design(newX = Xsgrid_01, model = model, Ytrue = Ytrue, err_sig = err_sig)
+  w_prime <-  w - max(w)
+  w_norm <- exp(w_prime) / sum(exp(w_prime))
+  
+  print(w_norm)
+  
+  # sample
+  grid_ids <- sample(1:nrow(Xsgrid_01), nrow(Xsgrid_01), prob = w_norm, replace = T)
+  grid_ids <- unique(grid_ids)
+  
+  # desnify
+  xsgrid_new <- c()
+  xsgrid_all <- c()
+  xsgrid_id <- c()
+  
+  acc_prop <- c()
+  
+  k <- 1
+  for (ii in grid_ids){
+    
+    if(nrow(xsgrid_new) < (nparam*nrep) || is.null(nrow(xsgrid_new))) {
+      # old candidate
+      xs_old <- Xsgrid_01[ii, ]
+      # proposal
+      xs_can <- rnorm(p, xs_old[1:p], prop_sig)
+      # nrep_can <- sample.int(nrep, 1)
+      xs_can_mat <- cbind(matrix(rep(xs_can, each = nrep), nrow = nrep), 1:nrep)
+      
+      print(xs_can_mat)
+      
+      # acceptance probability
+      if((all(xs_can[1:p] < 1)) & ((all(xs_can[1:p] > 0)))){
+        acc_prob <- loglik_design(xs_can_mat, model = f,
+                                  Ytrue, .5) - w[ii]
+        u <- log(runif(nrep))
+        
+        print(length(u))
+        print(length(acc_prob))
+        
+        selected_ids <- which(u < acc_prob)
+        if(length(selected_ids) > 0){
+          selected_id <- sort(sample(selected_ids, ceiling(length(selected_ids)/2)))
+          xsgrid_new <- rbind(xsgrid_new, xs_can_mat[selected_id, ])
+          xsgrid_all <- rbind(xsgrid_all, xs_can_mat)
+          xsgrid_id <- c(xsgrid_id, selected_id + (k-1)*20)
+        }
+        k <- k + 1
+        acc_prop <- c(acc_prop, 1)
+      } else {
+        acc_prop <- c(acc_prop, 0)
+      }
+    }
+  }
+  
+  return(list(xsgrid_new, xsgrid_all, xsgrid_id))
+}
+```
+
+

@@ -23,36 +23,15 @@ beta_range <- c(0.2, 0.5)
 gamma_range <- c(0.1, 0.4)
 strue <- 50
 
-ytrue <- run_sim(list(seed = strue, 
-                      par = xtrue, 
-                      param_bounds = rbind(beta_range, gamma_range),
-                      nsteps = 100,
-                      return_trajectory = F))
+ytrue <- run_sim(c(xtrue, strue))
 
-ytrue_full <- run_sim(list(seed = strue, 
-                           par = xtrue, 
-                           param_bounds = rbind(beta_range, gamma_range),
-                           nsteps = 100,
-                           return_trajectory = T))
-ytrue_full <- ytrue_full$n_SI
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
 ```
 
 ```{r}
-ytrue_err <- run_sim_err(list(seed = strue, 
-                              par = xtrue, 
-                              param_bounds = rbind(beta_range, gamma_range),
-                              nsteps = 100,
-                              ytrue_vec = ytrue_full))
+ytrue_err <- run_sim_err(c(xtrue, strue))
 ytrue_err
-```
-
-```{r}
-ytrue_err2 <- run_sim_err(list(seed = 10, 
-                              par = c(0.5, 0.5), 
-                              param_bounds = rbind(beta_range, gamma_range),
-                              nsteps = 100,
-                              ytrue_vec = ytrue_full))
-ytrue_err2
 ```
 
 ## BO
@@ -60,7 +39,7 @@ ytrue_err2
 #### Experimental settings (to be passed to batch R experiment code)
 
 ```{r}
-bo_experiment_seed <- 23
+exp_seed <- 23
 init_npar <- 10
 nrep <- 10
 sim_budget <- 200
@@ -68,6 +47,11 @@ grid_npar <- 100
 nTS_samp <- 30
 nTS_iter <- 20
 p <- 2
+GP_type <- "CRNGP"
+sim_func <- run_sim_err
+err_sig <- 0.5
+prop_sig <- 0.3
+ref <- -2
 ```
 
 #### Initial set of simulations (same for all surrogates + TS)
@@ -80,15 +64,13 @@ s <- 1:nrep
 Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
 
 y <- rep(NA, init_npar*nrep)
-k <- 1
-for (ii in 1:init_npar){
-  for (seed in s){
-    y[k] <- run_sim_err(seed = seed, params = Xs_01[k, 1:p], 
-                      param_bounds = rbind(beta_range, gamma_range), 
-                      ytrue_vec = ytrue_full)
-    k <- k + 1
-  }
+for (i in 1:(init_npar*nrep)){
+  y[i] <- run_sim_err(Xs_01[i, ])
 }
+
+ycenter <- mean(y)
+ysd <- sd(y)
+
 ```
 
 
@@ -103,11 +85,13 @@ f <- fitGP(Xs_01[, 1:p], y_std, GP_type = "hom", known = list(beta0 = 0), covtyp
 ```
 
 ```{r}
-f <- 
+
 TSBatchBO(init_npar, nrep, p, sim_budget = 200, 
-          grid_npar = 100, nTS_samp = 30, nTS_iter = 20,
-          adaptive = T, ytrue = ytrue_full, GP_type = "CRNGP",
-          sim_func = run_sim_err, exp_seed = bo_experiment_seed)
+          grid_npar = 100, nTS_samp = 30, nTS_iter = 5,
+          ytrue = ytrue_full, GP_type = "CRNGP", ref = ref,
+          err_sig = err_sig, prop_sig = prop_sig, 
+          sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+          adaptive = T)
 ```
 
 ```{r}

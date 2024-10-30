@@ -71,7 +71,7 @@ parse_sim_arg <- function(parlist){
 #' @export
 #'
 #' @examples
-run_sim <- function(parlist){
+run_sim <- function(par){
   
   # mandatory inputs
   # seed, par, param_bounds, nsteps = 100, return_trajectory = F
@@ -83,11 +83,17 @@ run_sim <- function(parlist){
     oldseed <- NULL
 
   # parse input
-  parse_sim_arg(parlist)
+  # parse_sim_arg(parlist)
+  npar <- length(par) # must be 2 for now
   
-  set.seed(seed)
-  beta <- param_bounds[1, 1] + par[1] * diff(range(param_bounds[1, ]))
-  gamma <- param_bounds[2, 1] + par[2] * diff(range(param_bounds[2, ]))
+  beta_range <- c(0.2, 0.5)
+  gamma_range <- c(0.1, 0.4)
+  nsteps <- 100
+  sim_seed <- par[3]
+  
+  set.seed(sim_seed)
+  beta <- beta_range[1] + par[1] * diff(range(beta_range))
+  gamma <- gamma_range[1] + par[2] * diff(range(gamma_range))
 
   ## simulate
   model <- stoch_SIR_odin$new(S_ini = 10000, I_ini = 20,
@@ -100,7 +106,7 @@ run_sim <- function(parlist){
   else
     rm(".Random.seed", envir = .GlobalEnv)
 
-  if(return_trajectory) return(out) else return(sum(out$n_SI))
+  return(out)
 }
 
 ## =====================================================================
@@ -117,7 +123,7 @@ run_sim <- function(parlist){
 #' @export
 #'
 #' @examples
-run_sim_err <- function(parlist){
+run_sim_err <- function(par){
   
   # mandatory inputs
   # seed, params, param_bounds, nsteps, ytrue_vec
@@ -129,17 +135,24 @@ run_sim_err <- function(parlist){
     oldseed <- NULL
   
   ## parse input
-  parse_sim_arg(parlist)
+  # parse_sim_arg(parlist)
+  npar <- length(par) # must be 2 for now
   
-  set.seed(seed)
+  beta_range <- c(0.2, 0.5)
+  gamma_range <- c(0.1, 0.4)
+  nsteps <- 100
+  sim_seed <- par[3]
   
-  beta <- param_bounds[1, 1] + par[1] * diff(range(param_bounds[1, ]))
-  gamma <- param_bounds[2, 1] + par[2] * diff(range(param_bounds[2, ]))
+  set.seed(sim_seed)
+  beta <- beta_range[1] + par[1] * diff(range(beta_range))
+  gamma <- gamma_range[1] + par[2] * diff(range(gamma_range))
   
   ## simulate
   model <- stoch_SIR_odin$new(S_ini = 10000, I_ini = 20,
                               beta = beta, gamma = gamma)
   out <- data.frame(model$run(step = 0:nsteps))
+  
+  ## standardize the output
   
   # restore random seed
   if (!is.null(oldseed)) 

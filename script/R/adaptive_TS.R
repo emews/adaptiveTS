@@ -34,8 +34,8 @@ fitGP <- function(X, Y, GP_type, ...){
 #' @export
 #'
 #' @examples
-loglik <- function(Ysim, Ytrue, err_sig){
-  dnorm(Ysim, Ytrue, err_sig, log = T)
+loglik <- function(ysim, ytrue, err_sig){
+  dnorm(ysim, ytrue, err_sig, log = T)
 }
 
 
@@ -52,12 +52,12 @@ loglik <- function(Ysim, Ytrue, err_sig){
 #' @export
 #'
 #' @examples
-loglik_design <- function(model, newX, Ytrue, err_sig){
+loglik_design <- function(model, newX, ytrue, err_sig){
   
   # predict from fitted GP
   pred <- predict(model, newX, xprime = newX)
   
-  ll <- loglik(pred$mean, Ytrue, err_sig)
+  ll <- loglik(pred$mean, ytrue, err_sig)
   return(ll)
 }
 
@@ -76,7 +76,7 @@ loglik_design <- function(model, newX, Ytrue, err_sig){
 #' @export
 #'
 #' @examples
-create_grid_CRNGP <- function(nparam, nrep, model, Ytrue, err_sig, prop_sig = 0.3){
+create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3){
   
   p <- ncol(model$X0)  # input dimension
   
@@ -86,7 +86,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, Ytrue, err_sig, prop_sig = 0.
   Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], rep(s, nparam))
   
   # calculate importance weights
-  w <- loglik_design(newX = Xsgrid_01, model = model, Ytrue = Ytrue, err_sig = err_sig)
+  w <- loglik_design(newX = Xsgrid_01, model = model, ytrue = ref, err_sig = err_sig)
   w_prime <-  w - max(w)
   w_norm <- exp(w_prime) / sum(exp(w_prime))
   
@@ -114,8 +114,8 @@ create_grid_CRNGP <- function(nparam, nrep, model, Ytrue, err_sig, prop_sig = 0.
       
       # acceptance probability
       if((all(xs_can[1:p] < 1)) & ((all(xs_can[1:p] > 0)))){
-        acc_prob <- loglik_design(xs_can_mat, model = f,
-                                  Ytrue, .5) - w[ii]
+        acc_prob <- loglik_design(xs_can_mat, model = model,
+                                  ref, .5) - w[ii]
         u <- log(runif(nrep))
         
         # print(length(u))
@@ -154,7 +154,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, Ytrue, err_sig, prop_sig = 0.
 #' @export
 #'
 #' @examples
-create_grid_GP <- function(nparam, nrep, p, model, Ytrue, err_sig, prop_sig = 0.3){
+create_grid_GP <- function(nparam, nrep, p, model, ref, err_sig, prop_sig = 0.3){
   
   p <- ncol(model$X0)  # input dimension
   
@@ -164,7 +164,7 @@ create_grid_GP <- function(nparam, nrep, p, model, Ytrue, err_sig, prop_sig = 0.
   Xsgrid_01 <- Xgrid_01[rep(1:nparam, each = nrep), ]
   
   # calculate importance weights
-  w <- loglik_design(xsgrid = Xgrid_01, model = model, Ytrue = Ytrue, err_sig = err_sig)
+  w <- loglik_design(xsgrid = Xgrid_01, model = model, ytrue = ytrue, err_sig = err_sig)
   w <- rep(w, each = nrep)
   w_prime <-  w - max(w)
   w_norm <- exp(w_prime) / sum(exp(w_prime))
@@ -242,6 +242,9 @@ parse_sim_arg <- function(parlist){
 #' @param sim_func 
 #' @param exp_seed 
 #' @param ... 
+#' @param ref 
+#' @param err_sig 
+#' @param prop_sig 
 #'
 #' @return
 #' @export
@@ -253,9 +256,12 @@ TSBatchBO <- function(init_npar,
                       sim_budget,
                       grid_npar,
                       nTS_samp,
-                      nTS_iter,
+                      nTS_iter = NULL,
                       adaptive = TRUE,
                       ytrue,
+                      ref = NULL,
+                      err_sig = NULL,
+                      prop_sig = NULL,
                       GP_type,
                       sim_func,
                       exp_seed = NULL,
@@ -267,28 +273,14 @@ TSBatchBO <- function(init_npar,
   if(!is.null(exp_seed)) set.seed(exp_seed)
   
   ## =====================
-  ## Fixed simulation settings
-  nsteps <- 100
-  beta_range <- c(0.2, 0.5)
-  gamma_range <- c(0.1, 0.4)
-  
-  ## =====================
   ## initial design and simulations
   X_01 <- randomLHS(n = init_npar, k = p)
   s <- 1:nrep
   Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
   
   y <- rep(NA, init_npar*nrep)
-  k <- 1
-  for (ii in 1:init_npar){
-    for (seed in s){
-      y[k] <- sim_func(list(seed = seed, 
-                            par = Xs_01[k, 1:p], 
-                            param_bounds = rbind(beta_range, gamma_range), 
-                            nsteps = nsteps,
-                            ytrue_vec = ytrue))
-      k <- k + 1
-    }
+  for (ii in 1:(init_npar*nrep)){
+    y[ii] <- sim_func(Xs_01[ii, ])
   }
   
   ## =====================
@@ -299,25 +291,34 @@ TSBatchBO <- function(init_npar,
   
   
   ## =====================
-  ## initiate TS
+  ## BO set up 
+  Xs <- Xs_01
+  Y <- y_std
+  f <- fitGP(Xs, Y, GP_type = GP_type, known = list(beta0 = 0), ...)
   
-  f <- fitGP(Xs_01, y_std, GP_type = GP_type)
-  
+  no_of_sims <- length(y)
   X_list <- list()
   y_list <- list()
-  evaluated_ids <- 1:nrow(Xs_01)
+  
+  X_list[[1]] <- Xs_01
+  y_list[[1]] <- y_std
   
   # ================================
   # fixed grid for non-adaptive case
   if(!adaptive) {
+    
+    evaluated_ids <- 1:nrow(Xs_01)
     Xgrid_01 <- randomLHS(n = grid_npar, k = p)
     Xsgrid_01 <- cbind(Xgrid_01[rep(1:grid_npar, each = nrep), ], 
                        rep(s, grid_npar))
+    Xsfull <- rbind(Xs_01, Xsgrid_01)
     
-    
-    for (tt in 1:nTS_iter){
-      out <- next_eval_CRN(model = f, 
-                           Xsgrid = Xsgrid_01, 
+    # TS starts here
+    tt <- 2
+    while(no_of_sims < sim_budget){
+    # for (tt in 1:nTS_iter){
+      out <- next_eval_CRN(model = f,
+                           Xsgrid = Xsfull, 
                            evaluated_ids = evaluated_ids,
                            nTS_samp = nTS_samp,
                            adaptive = F)
@@ -326,28 +327,73 @@ TSBatchBO <- function(init_npar,
       xnew <- out[[2]]
       
       ## evaluate new simulations 
-      ynew <- rep(NA, length(best_ids))
+      ynew <- rep(NA, length(out[[1]]))
       
       if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
       
-      for (ii in 1:length(best_ids)){
-        ynew[ii] <- sim_func(list(seed = seed, 
-                                  par = xnew[ii, 1:p], 
-                                  param_bounds = rbind(beta_range, gamma_range), 
-                                  nsteps = nsteps,
-                                  ytrue_vec = ytrue))
+      for (ii in 1:nrow(xnew)){
+        ynew[ii] <- sim_func(xnew[ii, ])
+      }
+      X_list[[tt]] <- xnew
+      y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+      
+      ## update surrogate
+      Xs <- rbind(Xs, xnew)
+      Y <- c(Y, y_list[[tt]])
+      f <- fitGP(Xs, Y, GP_type = GP_type, 
+                 known = list(beta0 = 0), ...)
+      
+      no_of_sims <- no_of_sims + length(ynew)
+      
+      cat("iter = ", tt, "\n")
+      tt <- tt + 1
+    }
+  }
+  
+  # ================================
+  # adaptive grid 
+  if(adaptive){
+    
+    # TS starts here
+    tt <- 2
+    while(no_of_sims < sim_budget){
+    # for (tt in 1:nTS_iter){
+      out <- next_eval_CRN(model = f,
+                           grid_npar = grid_npar,
+                           nrep = nrep,
+                           ref = ref,
+                           err_sig = err_sig,
+                           prop_sig = prop_sig,
+                           nTS_samp = nTS_samp,
+                           adaptive = T)
+      
+      xnew <- out
+      if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
+      
+      ## evaluate new simulations 
+      ynew <- rep(NA, nrow(xnew))
+      
+      for (ii in 1:nrow(xnew)){
+        ynew[ii] <- sim_func(xnew[ii, ])
       }
       X_list[[tt]] <- xnew
       y_list[[tt]] <- (log(ynew) - ycenter) / ysd  
       
       ## update surrogate
-      f <- fitGP(rbind(Xs_01, X_list[[tt]]), c(y_std, Y_list[[tt]]), GP_type = GP_type)
+      Xs <- rbind(Xs, xnew)
+      Y <- c(Y, y_list[[tt]])
+      f <- fitGP(Xs, Y, GP_type = GP_type, 
+                 known = list(beta0 = 0), ...)
+      
+      no_of_sims <- no_of_sims + length(ynew)
+      
+      cat("iter = ", tt, "\n")
+      
+      tt <- tt + 1
     }
-    
-    return(list(X_list, Y_list))
   }
   
-  
+  return(list(X_list, y_list))
   
   # return(f)
   
@@ -379,7 +425,7 @@ next_eval_CRN <- function(model,
                           adaptive = TRUE,
                           grid_npar = NULL,
                           nrep = NULL,
-                          Ytrue = NULL,
+                          ref = NULL,
                           err_sig = NULL,
                           prop_sig = NULL,
                           ...){
@@ -388,7 +434,7 @@ next_eval_CRN <- function(model,
     out <- adaptive_CRN_TS(model = model,
                            grid_npar = grid_npar,
                            nrep = nrep,
-                           Ytrue = Ytrue,
+                           ref = ref,
                            err_sig = err_sig,
                            prop_sig = prop_sig,
                            nTS_samp = nTS_samp, ...)
@@ -423,9 +469,8 @@ fixed_CRN_TS <- function(model,
                          nTS_samp, ...){
   
   
-  Xfull <- rbind(cbind(model$X0, model$S0), Xsgrid)
-  tTS <- simul(object = model, Xfull, ids = evaluated_ids, 
-               nsim = nTS_samp, ...)
+  tTS <- simul(object = model, Xsgrid, ids = evaluated_ids, 
+               nsim = nTS_samp, check = F, ...)
   
   best_ids <- apply(tTS, 2, function(x){
     m_tmp <- cbind(x, 1:length(x))
@@ -437,7 +482,7 @@ fixed_CRN_TS <- function(model,
   
   best_ids <- unique(best_ids)
   
-  return(list(best_ids, Xfull[best_ids, ]))
+  return(list(best_ids, Xsgrid[best_ids, ]))
 }
 
 #' Title
@@ -457,7 +502,7 @@ fixed_CRN_TS <- function(model,
 adaptive_CRN_TS <- function(model,
                             grid_npar,
                             nrep,
-                            Ytrue,
+                            ref,
                             err_sig,
                             prop_sig,
                             nTS_samp){
@@ -466,7 +511,7 @@ adaptive_CRN_TS <- function(model,
   grid <- create_grid_CRNGP(grid_npar, 
                             nrep, 
                             model, 
-                            Ytrue, 
+                            ref, 
                             err_sig, 
                             prop_sig)
   Xsgrid <- grid[[1]]
@@ -474,7 +519,7 @@ adaptive_CRN_TS <- function(model,
   Xsgrid_id <- grid[[3]]
   
   ## predict
-  pred <- predict(f, Xsgrid, xprime = Xsgrid)
+  pred <- predict(model, Xsgrid, xprime = Xsgrid)
   tTS <- MASS::mvrnorm(n = nTS_samp, 
                        mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
   

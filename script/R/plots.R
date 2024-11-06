@@ -11,20 +11,36 @@ library(GGally)
 #' @export
 #'
 #' @examples
-pairs_plot <- function(x_fixed_mat, x_adaptive_mat, save = F){
+pairs_plot <- function(x_fixed_CRNGP_mat, 
+                       x_adaptive_CRNGP_mat, 
+                       x_fixed_hetGP_mat, 
+                       x_adaptive_hetGP_mat,
+                       save = F){
   
-  df_fixed <- as.data.frame(x_fixed_mat)
-  df_fixed$type <- "Fixed grid"
+  df_fixed_CRNGP <- as.data.frame(x_fixed_CRNGP_mat)
+  df_fixed_CRNGP$type <- "Fixed CRNGP grid"
+  colnames(df_fixed_CRNGP)[1:3] <- c("beta", "gamma", "seed")
   
-  df_adaptive <- as.data.frame(x_adaptive_mat)
-  df_adaptive$type <- "Adaptive grid"
+  df_adaptive_CRNGP <- as.data.frame(x_adaptive_CRNGP_mat)
+  df_adaptive_CRNGP$type <- "Adaptive CRNGP grid"
+  colnames(df_adaptive_CRNGP)[1:3] <- c("beta", "gamma", "seed")
   
-  df <- rbind(df_fixed, df_adaptive)
-  colnames(df)[1:3] <- c("beta", "gamma", "seed")
+  df_fixed_hetGP <- as.data.frame(x_fixed_hetGP_mat)
+  df_fixed_hetGP$type <- "Fixed hetGP grid"
+  colnames(df_fixed_hetGP)[1:3] <- c("beta", "gamma", "seed")
+  
+  df_adaptive_hetGP <- as.data.frame(x_adaptive_hetGP_mat)
+  df_adaptive_hetGP$type <- "Adaptive hetGP grid"
+  colnames(df_adaptive_hetGP)[1:3] <- c("beta", "gamma", "seed")
+  
+  df <- rbind(df_fixed_CRNGP, df_adaptive_CRNGP, df_fixed_hetGP, df_adaptive_hetGP)
   
   p <- ggpairs(df, 
-               aes(color = type, shape = type, alpha = 0.5),
-               columns = 1:3) +
+               aes(color = type, fill = type, alpha = 0.5),
+               columns = 1:2,
+               diag = list(continuous = wrap("densityDiag", alpha = 0.5)),  # Density on diagonal
+               # upper = list(continuous = wrap("density", alpha = 0.5)),  # 2D density on upper panels
+               lower = list(continuous = wrap("density", alpha = 0.5))) +
                # diag = list(continuous = "barDiag")) +
     theme_minimal() +
     labs(title = "Evaluated points")
@@ -49,7 +65,8 @@ pairs_plot <- function(x_fixed_mat, x_adaptive_mat, save = F){
 #' @export
 #'
 #' @examples
-plot_nbest_traj <- function(nbest, x_fixed_mat, x_adaptive_mat, y_fixed_vec, y_adaptive_vec, yobs){
+plot_nbest_traj <- function(nbest, x_fixed_mat, x_adaptive_mat, y_fixed_vec, y_adaptive_vec, 
+                            yobs, legend_labels = c("Fixed", "Adaptive")){
   
   x_fixed_best <- x_fixed_mat[order(y_fixed_vec)[1:nbest], ]
   x_adaptive_best <- x_adaptive_mat[order(y_adaptive_vec)[1:nbest], ]
@@ -71,7 +88,7 @@ plot_nbest_traj <- function(nbest, x_fixed_mat, x_adaptive_mat, y_fixed_vec, y_a
                                  c(as.numeric(y_fixed_mat), 
                                    as.numeric(y_adaptive_mat)),
                                  rep(1:(nbest*2), each = nsteps+1)))
-  df_traj <- cbind(df_traj, factor(rep(c("Fixed", "Adaptive"), each = (nsteps+1)*nbest)))
+  df_traj <- cbind(df_traj, factor(rep(legend_labels, each = (nsteps+1)*nbest)))
   df_true <- data.frame(tt = 0:nsteps, yobs = yobs)                         
   
   colnames(df_traj) <- c("time", "new_infections", "rep", "type")
@@ -100,24 +117,25 @@ plot_nbest_traj <- function(nbest, x_fixed_mat, x_adaptive_mat, y_fixed_vec, y_a
 #' @export
 #'
 #' @examples
-plot_pct_traj <- function(nbest, y_fixed_native, y_adaptive_native, nerror_ticks = 20){
+plot_pct_traj <- function(nbest, y_fixed_native, y_adaptive_native, 
+                          nerror_ticks = 20){
   
   y_df <- data.frame(y = c(y_fixed_native[order(y_fixed_native)][1:nbest], 
                            y_adaptive_native[order(y_adaptive_native)][1:nbest]),
                    type = rep(c("Fixed", "Adaptive"), each = nbest))
 
   error_ticks <- seq(0, max(y_df$y), length.out = nerror_ticks)
-  pctraj_apapt <- pctraj_random <- rep(NA, nerror_ticks)
+  pctraj_adapt <- pctraj_random <- rep(NA, nerror_ticks)
   
   for (ii in 1:nerror_ticks){
-    pctraj_apapt[ii] <- mean(y_df$y[y_df$type == "Adaptive"] < error_ticks[ii])
+    pctraj_adapt[ii] <- mean(y_df$y[y_df$type == "Adaptive"] < error_ticks[ii])
     pctraj_random[ii] <- mean(y_df$y[y_df$type == "Fixed"] < error_ticks[ii])
   }
   
-  plot(error_ticks, pctraj_apapt, pch = 19, col = alpha("#F8766D", 01), type = "b", 
+  plot(error_ticks, pctraj_adapt, pch = 19, col = alpha("#F8766D", 01), type = "b", 
        xlab = "sum-squared-error", ylab = "percentage of nbest trajectories", main = paste("nbest = ", nbest))
   points(error_ticks, pctraj_random, pch = 19, col = alpha("#00BA38", 1), type = "b")
-  legend("topleft", c("adaptive", "fixed"), pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+  legend("topleft", c("Adaptive", "Fixed"), pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
 }
 
 

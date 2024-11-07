@@ -71,7 +71,7 @@ create_grid_GP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3){
       
       # acceptance probability
       if((all(xs_can[1:p] < 1)) & ((all(xs_can[1:p] > 0)))){
-        loglik_new_design <- loglik_design_het(xs_can_mat, model = f,
+        loglik_new_design <- loglik_design_het(xs_can_mat, model = model,
                                            ref, err_sig)
         
         acc_prob <- loglik_new_design - w[ii]

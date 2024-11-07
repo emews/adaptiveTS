@@ -32,7 +32,7 @@ The workflow configuration file has the following format:
 ```bash
 CFG_WALLTIME=00:20:00
 NODES=2
-CFG_PPN=52
+CFG_PPN=64
 CFG_PROCS=$(( NODES * CFG_PPN ))
 # SHOULD BE ~ 128 / CFG_PPN
 CFG_MKL_THREADS=2
@@ -45,8 +45,8 @@ CFG_UPF_FILE=upfs/upf_100.csv
 
 * CFG_WALLTIME - the workflow job's walltime
 * NODES - the number of nodes to allocate to the job
-* CFG_PPN - the number of procs per node. The maximum is 128 on improve
-* CFG_PROC - the total number of processes allocated to the job. This line should not be edited.
+* CFG_PPN - the number of procs per node. The maximum is 128 on Improv. 
+* CFG_PROCS - the total number of processes allocated to the job. This line should not be edited.
 * CFG_MKL_THREADS - the number of threads to allocate to each R instance. See below for more details.
 * CFG_QUEUE - the machine queue to run
 * CFG_PROJECT - the project to charge for the run
@@ -54,6 +54,12 @@ CFG_UPF_FILE=upfs/upf_100.csv
 
 The results of a run will be written the experiment directory's `results` directory.
 The file name will be prefixed with the `exp_id` value from the csv upf file.
+
+### PPN ###
+
+Setting the CFG_PPN value, sets the number of R instances (how many rows in the UPF file) to run on each node. The workflow itself
+requires 2, so this must always be at least 3. There's probably some sweet spot here that makes best use of
+threads while not using too many nodes. For now, maybe `CFG_PPN` of 64 and `CFG_MKL_THREADS`=2 is a good starting point.
 
 ### MKL THREADS ###
 

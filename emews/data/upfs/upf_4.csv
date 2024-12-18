@@ -1,0 +1,5 @@
+"exp_id","exp_seed","init_npar","nrep","sim_budget","grid_npar","nTS_samp","exp_path"
+"exp_1",1,5,10,200,100,10,"/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_1/"
+"exp_2",2,5,10,200,100,10,"/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_2/"
+"exp_3",3,5,10,200,100,10,"/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_3/"
+"exp_4",4,5,10,200,100,10,"/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_4/"

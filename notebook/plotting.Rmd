@@ -1,0 +1,189 @@
+---
+title: "Experiment plot"
+output: html_notebook
+---
+
+
+
+```{r}
+library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+
+source("../script/R/odin-sim.R")
+source("../script/R/plots.R")
+```
+
+## Ground truth
+
+```{r}
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+```
+
+
+## Look at the experiments
+
+```{r}
+
+BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/"
+exp_seed <- 1
+init_npar <- c(5, 10)
+nrep <- c(10, 20)
+sim_budget <- c(200, 400, 600)
+grid_npar <- c(100, 200)
+nTS_samp <- c(10, 20, 30)
+
+
+d <- expand.grid(exp_seed, init_npar, nrep, sim_budget, grid_npar, nTS_samp)
+colnames(d) <- c("exp_seed", "init_npar", "nrep", "sim_budget", "grid_npar", "nTS_samp")
+
+d_eff <- d[d$init_npar * d$nrep < d$sim_budget, ]
+d_eff$exp_id <- paste0("exp_", 1:nrow(d_eff))
+
+d_eff <- d_eff[, c(7, 1:6)]
+d_eff$exp_path <- paste0(BASE_DIR, d_eff$exp_id, "/")
+
+# d_eff <- fread("../experiments/config.csv")
+
+```
+
+
+
+```{r}
+k <- sample(nrow(d_eff), 1)
+k <- 4
+cat("exp_id = ", d_eff$exp_id[k], "\n")
+
+sim_budget <- d_eff$sim_budget[k]
+load(paste0(d_eff$exp_path[k], "out.RData"))
+
+## collect and format results
+
+x_fixed_CRNGP_mat <- do.call(rbind, out_fixed_CRNGP[[1]])
+x_adaptive_CRNGP_mat <- do.call(rbind, out_adaptive_CRNGP[[1]])
+x_fixed_hetGP_mat <- do.call(rbind, out_fixed_hetGP[[1]])
+x_adaptive_hetGP_mat <- do.call(rbind, out_adaptive_hetGP[[1]])
+
+y_fixed_CRNGP_vec <- unlist(out_fixed_CRNGP[[2]])
+y_adaptive_CRNGP_vec <- unlist(out_adaptive_CRNGP[[2]])
+y_fixed_hetGP_vec <- unlist(out_fixed_hetGP[[2]])
+y_adaptive_hetGP_vec <- unlist(out_adaptive_hetGP[[2]])
+
+y_fixed_CRNGP_native <- unlist(out_fixed_CRNGP[[3]])
+y_adaptive_CRNGP_native <- unlist(out_adaptive_CRNGP[[3]])
+
+## run simulations
+
+sim_length <- 101
+
+y_fixed_CRNGP_traj <- matrix(NA, nrow = sim_length, ncol = nrow(x_fixed_CRNGP_mat))
+for (ii in 1:nrow(x_fixed_CRNGP_mat)){
+  o <- run_sim(x_fixed_CRNGP_mat[ii, ])
+  y_fixed_CRNGP_traj[, ii] <- o$n_SI
+}
+
+y_adaptive_CRNGP_traj <- matrix(NA, nrow = sim_length, ncol = nrow(x_adaptive_CRNGP_mat))
+for (ii in 1:nrow(x_adaptive_CRNGP_mat)){
+  o <- run_sim(x_adaptive_CRNGP_mat[ii, ])
+  y_adaptive_CRNGP_traj[, ii] <- o$n_SI
+}
+
+y_fixed_hetGP_traj <- matrix(NA, nrow = sim_length, ncol = nrow(x_fixed_hetGP_mat))
+for (ii in 1:nrow(x_fixed_hetGP_mat)){
+  o <- run_sim(x_fixed_hetGP_mat[ii, ])
+  y_fixed_hetGP_traj[, ii] <- o$n_SI
+}
+
+y_adaptive_hetGP_traj <- matrix(NA, nrow = sim_length, ncol = nrow(x_adaptive_hetGP_mat))
+for (ii in 1:nrow(x_adaptive_hetGP_mat)){
+  o <- run_sim(x_adaptive_hetGP_mat[ii, ])
+  y_adaptive_hetGP_traj[, ii] <- o$n_SI
+}
+
+# run simulations and calculate sum squared errors
+
+y_fixed_CRNGP_native <- y_adaptive_CRNGP_native <- y_fixed_hetGP_native <- y_adaptive_hetGP_native <- rep(NA, sim_budget)
+for(ii in 1:sim_budget){
+  y_fixed_CRNGP_native[ii] <-run_sim_err(x_fixed_CRNGP_mat[ii, ])
+  y_adaptive_CRNGP_native[ii] <- run_sim_err(x_adaptive_CRNGP_mat[ii, ])
+  y_fixed_hetGP_native[ii] <-run_sim_err(x_fixed_hetGP_mat[ii, ])
+  y_adaptive_hetGP_native[ii] <- run_sim_err(x_adaptive_hetGP_mat[ii, ])
+}
+
+
+```
+
+```{r}
+p_pairs <- pairs_plot(x_fixed_CRNGP_mat, 
+                      x_adaptive_CRNGP_mat, 
+                      x_fixed_hetGP_mat, 
+                      x_adaptive_hetGP_mat)
+p_pairs
+```
+
+## CRNGP trajectories
+
+```{r}
+
+
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, x_fixed_CRNGP_mat, x_adaptive_CRNGP_mat, 
+                        y_fixed_CRNGP_vec, y_adaptive_CRNGP_vec, yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+```
+
+## HetGP trajectories
+
+```{r}
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, x_fixed_hetGP_mat, x_adaptive_hetGP_mat, 
+                        y_fixed_hetGP_vec, y_adaptive_hetGP_vec, yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+
+```
+
+## CRNGP
+
+```{r, fig.height=5}
+nbests <- seq(20, sim_budget, length.out = 6)
+par(mfrow = c(3, 2))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, y_adaptive_CRNGP_native, y_fixed_CRNGP_native, labs = c("CRN-adaptive", "CRN-fixed"))
+}
+
+```
+
+## HetGP
+
+```{r, fig.height=5}
+par(mfrow = c(3, 2))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, y_adaptive_hetGP_native, y_fixed_hetGP_native, labs = c("het-adaptive", "het-fixed"))
+}
+```
+## CRNGP-adaptive vs hetGP-adaptive
+
+```{r, fig.height=5}
+par(mfrow = c(3, 2))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, y_adaptive_CRNGP_native, y_fixed_hetGP_native, labs = c("CRN-adaptive", "het-adaptive"))
+}
+```
+
+```{r, fig.width=7, fig.height=3}
+par(mfrow = c(1, 3))
+area_under_curve(nbests, y_adaptive_CRNGP_native, y_fixed_CRNGP_native, labs = c("CRN-adaptive", "CRN-fixed"))
+area_under_curve(nbests, y_adaptive_hetGP_native, y_fixed_hetGP_native, labs = c("het-adaptive", "het-fixed"))
+area_under_curve(nbests, y_adaptive_CRNGP_native, y_adaptive_hetGP_native, labs = c("CRN-adaptive", "het-adaptive"))
+```
+

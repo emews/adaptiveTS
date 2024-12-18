@@ -82,7 +82,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
   
   # lhs design to initialize
   s <- 1:nrep
-  Xgrid_01 <- randomLHS(n = nparam, k = p)
+  Xgrid_01 <- lhs::randomLHS(n = nparam, k = p)
   Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], rep(s, nparam))
   
   # calculate importance weights
@@ -196,7 +196,7 @@ TSBatchBO_CRNGP <- function(init_npar,
   
   ## =====================
   ## initial design and simulations
-  X_01 <- randomLHS(n = init_npar, k = p)
+  X_01 <- lhs::randomLHS(n = init_npar, k = p)
   s <- 1:nrep
   Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
   

@@ -133,9 +133,41 @@ plot_pct_traj <- function(nbest, y_fixed_native, y_adaptive_native,
   }
   
   plot(error_ticks, pctraj_adapt, pch = 19, col = alpha("#F8766D", 01), type = "b", 
-       xlab = "sum-squared-error", ylab = "percentage of nbest trajectories", main = paste("nbest = ", nbest))
+       xlab = "sum-squared-error", ylab = "% best traj", main = paste("nbest = ", nbest))
   points(error_ticks, pctraj_random, pch = 19, col = alpha("#00BA38", 1), type = "b")
   legend("topleft", c("Adaptive", "Fixed"), pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+}
+
+#' Title
+#'
+#' @param nbest 
+#' @param y_fixed_native 
+#' @param y_adaptive_native 
+#' @param nerror_ticks 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+plot_pct_traj2 <- function(nbest, y1, y2, labs, 
+                          nerror_ticks = 20){
+  
+  y_df <- data.frame(y = c(y1[order(y1)][1:nbest], 
+                           y2[order(y2)][1:nbest]),
+                     type = rep(labs, each = nbest))
+  
+  error_ticks <- seq(0, max(y_df$y), length.out = nerror_ticks)
+  pctraj_1 <- pctraj_2 <- rep(NA, nerror_ticks)
+  
+  for (ii in 1:nerror_ticks){
+    pctraj_1[ii] <- mean(y_df$y[y_df$type == labs[1]] < error_ticks[ii])
+    pctraj_2[ii] <- mean(y_df$y[y_df$type == labs[2]] < error_ticks[ii])
+  }
+  
+  plot(error_ticks, pctraj_1, pch = 19, col = alpha("#F8766D", 01), type = "b", 
+       xlab = "sum-squared-error", ylab = "% best traj", main = paste("nbest = ", nbest))
+  points(error_ticks, pctraj_2, pch = 19, col = alpha("#00BA38", 1), type = "b")
+  legend("topleft", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
 }
 
 
@@ -206,3 +238,32 @@ contour_compare <- function(nbest, rep_id, x_fixed_mat, x_adaptive_mat, y_fixed_
 
 
 ## TODO: area under the curve
+
+area_under_curve <- function(nbests, y1, y2, labs,
+                             nerror_ticks = 20){
+  
+  area_vec <- rep(NA, length(nbests))
+  
+  l <- 1
+  for (nbest in nbests){
+    y_df <- data.frame(y = c(y1[order(y1)][1:nbest], 
+                             y2[order(y2)][1:nbest]),
+                       type = rep(labs, each = nbest))
+    
+    error_ticks <- seq(0, max(y_df$y), length.out = nerror_ticks)
+    pctraj_1 <- pctraj_2 <- rep(NA, nerror_ticks)
+    
+    for (ii in 1:nerror_ticks){
+      pctraj_1[ii] <- mean(y_df$y[y_df$type == labs[1]] < error_ticks[ii])
+      pctraj_2[ii] <- mean(y_df$y[y_df$type == labs[2]] < error_ticks[ii])
+    }
+  
+    area_vec[l] <- sum(pctraj_1 - pctraj_2)
+    l <- l + 1
+  }
+  
+  barplot(area_vec, names.arg = nbests, 
+          ylab = "area under curve", xlab = "nbest trajectories",
+          main = paste(labs[1], " - ", labs[2]))
+  
+}

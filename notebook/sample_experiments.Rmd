@@ -1,0 +1,125 @@
+---
+title: "One at a time experiment"
+output: html_notebook
+---
+
+```{r}
+library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+
+source("../script/R/odin-sim.R")
+source("../script/R/adaptive_TS.R")
+source("../script/R/adaptive_TS_nonCRN.R")
+source("../script/R/plots.R")
+```
+## Ground truth
+
+```{r}
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+```
+
+
+## Create a small experiment grid
+
+```{r}
+
+BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/"
+exp_seed <- 1
+init_npar <- c(5, 10)
+nrep <- c(10, 20)
+sim_budget <- c(200, 400, 600)
+grid_npar <- c(100, 200)
+nTS_samp <- c(10, 20, 30)
+
+
+d <- expand.grid(exp_seed, init_npar, nrep, sim_budget, grid_npar, nTS_samp)
+colnames(d) <- c("exp_seed", "init_npar", "nrep", "sim_budget", "grid_npar", "nTS_samp")
+
+d_eff <- d[d$init_npar * d$nrep < d$sim_budget, ]
+d_eff$exp_id <- paste0("exp_", 1:nrow(d_eff))
+
+d_eff <- d_eff[, c(7, 1:6)]
+d_eff$exp_path <- paste0(BASE_DIR, d_eff$exp_id, "/")
+
+# d_eff <- fread("../experiments/config.csv")
+
+```
+
+## Run the experiments
+
+```{r}
+for (ii in 1:nrow(d_eff)){
+  
+  exp_path <- d_eff$exp_path[ii]
+  exp_seed <- d_eff$exp_seed[ii]
+  init_npar <- d_eff$init_npar[ii]
+  nrep <- d_eff$nrep[ii]
+  sim_budget <- d_eff$sim_budget[ii]
+  grid_npar <- d_eff$grid_npar[ii]
+  nTS_samp <- d_eff$nTS_samp[ii]
+  
+  # optional input
+  err_sig <- 0.5
+  prop_sig <- 0.3
+  
+  # fixed input for these experiments
+  sim_func <- run_sim_err
+  p <- 2
+  ref <- -2
+  
+  dir.create(exp_path)
+
+  ## run BO
+
+  out_fixed_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                     grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                     ytrue = ytrue_full, ref = ref,
+                                     err_sig = err_sig, prop_sig = prop_sig, 
+                                     sim_func = run_sim_err, exp_seed = exp_seed, 
+                                     covtype = "Matern5_2",
+                                     adaptive = F)
+  
+  out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                        grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                        ytrue = ytrue_full, ref = ref,
+                                        err_sig = err_sig, prop_sig = prop_sig, 
+                                        sim_func = run_sim_err, exp_seed = exp_seed, 
+                                        covtype = "Matern5_2",
+                                        adaptive = T)
+  
+  out_fixed_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                     grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                     ytrue = ytrue_full, ref = ref,
+                                     err_sig = err_sig, prop_sig = prop_sig, 
+                                     sim_func = run_sim_err, exp_seed = exp_seed, 
+                                     covtype = "Matern5_2",
+                                     adaptive = F)
+  
+  out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                        grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                        ytrue = ytrue_full, ref = ref,
+                                        err_sig = err_sig, prop_sig = prop_sig, 
+                                        sim_func = run_sim_err, exp_seed = exp_seed, 
+                                        covtype = "Matern5_2",
+                                        adaptive = T)
+  
+  save(out_fixed_CRNGP,
+       out_adaptive_CRNGP,
+       out_fixed_hetGP,
+       out_adaptive_hetGP,
+       file = paste0(exp_path, "out.RData"))
+    
+}
+
+
+```
+

@@ -1,0 +1,488 @@
+---
+title: "Example BO2"
+output: html_notebook
+---
+
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+source("../script/R/odin-sim.R")
+source("../script/R/adaptive_TS.R")
+source("../script/R/adaptive_TS_nonCRN.R")
+source("../script/R/plots.R")
+```
+
+
+```{r}
+## Create ground truth
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+
+
+# user input
+exp_path <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/exp_1/"
+exp_seed <- 23
+init_npar <- 5
+nrep <- 10
+sim_budget <- 200
+grid_npar <- 100
+nTS_samp <- 30
+
+# optional input
+err_sig <- 0.5
+prop_sig <- 0.3
+
+# fixed input for these experiments
+sim_func <- run_sim_err
+p <- 2
+ref <- -2
+```
+
+
+```{r}
+out_fixed_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                   grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                   ytrue = ytrue_full, ref = ref,
+                                   err_sig = err_sig, prop_sig = prop_sig, 
+                                   sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                   adaptive = F)
+
+out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                      grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                      ytrue = ytrue_full, ref = ref,
+                                      err_sig = err_sig, prop_sig = prop_sig, 
+                                      sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                      adaptive = T)
+
+out_fixed_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                   grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                   ytrue = ytrue_full, ref = ref,
+                                   err_sig = err_sig, prop_sig = prop_sig, 
+                                   sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                   adaptive = F)
+
+out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                      grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                      ytrue = ytrue_full, ref = ref,
+                                      err_sig = err_sig, prop_sig = prop_sig, 
+                                      sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                      adaptive = T)
+
+```
+
+
+```{r}
+## collect and format results
+collect_results <- function(out_list){
+  x_mat <- do.call(rbind, out_list$X_list)
+  y_vec <- unlist(out_list$y_list)
+  y_native <- unlist(out_list$ynative_list)
+  
+  simout_flat <- do.call(c,out_list$simout_list)
+  simout_mat <- do.call(cbind, lapply(simout_flat, function(df) df$n_SI))
+  
+  return(list(x_mat=x_mat, 
+              y_vec=y_vec, 
+              y_native=y_native, 
+              simout_mat=simout_mat))
+}
+
+res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
+res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
+res_fixed_hetGP <- collect_results(out_fixed_hetGP)
+res_adaptive_hetGP <- collect_results(out_adaptive_hetGP)
+```
+
+
+```{r}
+x_list <- out_fixed_CRNGP$X_list
+plot(x_list[[1]][,1:2], col=alpha(rgb(0,0,0), 0.5))
+points(0.45, 0.35, col='blue')
+for(i in 2:length(x_list)){
+  points(x_list[[i]][,1:2], col=alpha(rgb(0,0,0), 0.5))
+}
+
+```
+
+
+```{r}
+pairs_plot(res_fixed_CRNGP$x_mat,
+           res_adaptive_CRNGP$x_mat,
+           res_fixed_hetGP$x_mat,
+           res_adaptive_hetGP$x_mat)
+```
+
+```{r}
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, 
+                        res_fixed_CRNGP$x_mat, 
+                        res_adaptive_CRNGP$x_mat, 
+                        res_fixed_CRNGP$y_vec, 
+                        res_adaptive_CRNGP$y_vec, 
+                        yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+```
+```{r, fig.width=14, fig.height=7}
+nbests <- seq(20, sim_budget, length.out = 6)
+par(mfrow = c(2, 3))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+}
+```
+
+```{r}
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+
+n = 50
+nbest = 10
+
+res_fixed <- best_so_far(res_fixed_CRNGP$y_native, m=nbest, n=n)
+res_adaptive <- best_so_far(res_adaptive_CRNGP$y_native, m=nbest, n=n)
+
+labs = c("CRN-adaptive", "CRN-fixed")
+xax_fixed = (1:length(res_fixed)) + n
+xax_adapt = (1:length(res_adaptive)) + n
+
+plot(xax_adapt, res_adaptive, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("nbest = ", nbest))
+points(xax_fixed, res_fixed, pch = 19, col = alpha("#00BA38", 1), type = "l")
+legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+
+```
+
+
+```{r}
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+
+```
+
+
+```{r}
+config <- read.csv('../experiments/config.csv')
+
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+auc_trapezoids<- function(y){
+  x <- seq_along(y)
+  # want zero to be reference
+  
+  auc <- sum((y[-1] + y[-length(y)]) * diff(x) / 2)
+  return(auc)
+}
+
+
+n <- 50
+nbest <- 10
+
+```
+
+```{r}
+load(sprintf("../experiments/experiments/exp_%d/out.RData", 1))
+y_fixed_crn <- unlist(out_fixed_CRNGP[[2]])
+y_adapt_crn <- unlist(out_adaptive_CRNGP[[2]])
+y_fixed_het <- unlist(out_fixed_hetGP[[2]])
+y_adapt_het <- unlist(out_adaptive_hetGP[[2]])
+```
+
+```{r}
+exp <- 1
+exp_auc <- function(exp, n, nbest){
+  load(sprintf("../experiments/experiments/exp_%d/out.RData", exp))
+  
+  y_fixed_crn <- unlist(out_fixed_CRNGP[[2]])
+  y_adapt_crn <- unlist(out_adaptive_CRNGP[[2]])
+  y_fixed_het <- unlist(out_fixed_hetGP[[2]])
+  y_adapt_het <- unlist(out_adaptive_hetGP[[2]])
+  
+  
+  # negative makes auc weird
+  ymin <- min(y_fixed_crn, y_adapt_crn, y_fixed_het, y_adapt_het)
+  ymax <- max(y_fixed_crn, y_adapt_crn, y_fixed_het, y_adapt_het)
+  
+  y_fixed_crn <- y_fixed_crn - ymin
+  y_adapt_crn <- y_adapt_crn - ymin
+  y_fixed_het <- y_fixed_het - ymin
+  y_adapt_het <- y_adapt_het - ymin
+  
+  res_fixed_crn <- best_so_far(y_fixed_crn, m=nbest, n=n)
+  res_adaptive_crn <- best_so_far(y_adapt_crn, m=nbest, n=n)
+  res_fixed_het <- best_so_far(y_fixed_het, m=nbest, n=n)
+  res_adaptive_het <- best_so_far(y_adapt_het, m=nbest, n=n)
+  
+  labs = c("CRN-adaptive", "CRN-fixed", "Het-adaptive", "Het-fixed")
+  xax_fixed_crn = (1:length(res_fixed_crn)) + n
+  xax_adapt_crn = (1:length(res_adaptive_crn)) + n
+  xax_fixed_het = (1:length(res_fixed_het)) + n
+  xax_adapt_het = (1:length(res_adaptive_het)) + n
+  
+  plot(xax_adapt_crn, res_adaptive_crn, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("Experiment", exp))
+  points(xax_fixed_crn, res_fixed_crn, pch = 19, col = alpha("#00BA38", 1), type = "l")
+  points(xax_adapt_het, res_adaptive_het, pch = 19, col = alpha("#4287f5", 1), type = "l")
+  points(xax_fixed_het, res_fixed_het, pch = 19, col = alpha("#f5c842", 1), type = "l")
+  legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38", "#4287f5", "#f5c842"))
+
+  
+  auc_fixed_crn <- auc_trapezoids(res_fixed_crn)
+  auc_adapt_crn <- auc_trapezoids(res_adaptive_crn)
+  auc_fixed_het <- auc_trapezoids(res_fixed_het)
+  auc_adapt_het <- auc_trapezoids(res_adaptive_het)
+  
+  auc_out <- list(auc_fixed_crn=auc_fixed_crn,
+               auc_adapt_crn=auc_adapt_crn,
+               auc_fixed_het=auc_fixed_het,
+               auc_adapt_het=auc_adapt_het,
+               #auc_delta=(auc_adapt-auc_fixed)/auc_fixed,
+               auc_fixed_crn_pct = auc_fixed_crn/(ymax * length(res_fixed_crn)),
+               auc_adaptive_crn_pct = auc_adapt_crn/(ymax * length(res_adaptive_crn)),
+               auc_fixed_het_pct = auc_fixed_het/(ymax * length(res_fixed_het)),
+               auc_adaptive_het_pct = auc_adapt_het/(ymax * length(res_adaptive_het)))
+  return(auc_out)
+}
+
+```
+
+
+```{r}
+exp_auc(1, n=n, nbest=nbest)
+```
+
+```{r}
+par(mfrow = c(1, 3))
+for(nbest in c(10, 20, 50)){
+  exp_auc(1, n=n, nbest=nbest)
+}
+
+```
+
+
+
+```{r}
+BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/"
+exp_seed <- 1
+init_npar <- c(5, 10)
+nrep <- c(10, 20)
+sim_budget <- c(200, 400, 600)
+grid_npar <- c(100, 200)
+nTS_samp <- c(10, 20, 30)
+
+
+d <- expand.grid(exp_seed, init_npar, nrep, sim_budget, grid_npar, nTS_samp)
+colnames(d) <- c("exp_seed", "init_npar", "nrep", "sim_budget", "grid_npar", "nTS_samp")
+
+d_eff <- d[d$init_npar * d$nrep < d$sim_budget, ]
+d_eff$exp_id <- paste0("exp_", 1:nrow(d_eff))
+
+d_eff <- d_eff[, c(7, 1:6)]
+d_eff$exp_path <- paste0(BASE_DIR, d_eff$exp_id, "/")
+```
+
+
+```{r}
+result <- do.call(rbind, lapply(1:66, function(x) {
+  output <- exp_auc(x, n, nbest=10)  # Get the named list
+  c(exp_id = sprintf("exp_%d", x), output)      # Combine the input with the list
+}))
+
+# Convert to a data.frame
+result_df <- as.data.frame(result, stringsAsFactors = FALSE)
+```
+```{r}
+result_df <- as.data.frame(merge(d_eff, result_df))
+```
+
+
+```{r}
+library(tidyr)
+cols <-  c("init_npar","nrep","sim_budget","grid_npar","nTS_samp", "auc_fixed_crn_pct","auc_adaptive_crn_pct", "auc_fixed_het_pct","auc_adaptive_het_pct")
+
+melted_df <- result_df[,cols] %>%
+  pivot_longer(
+    cols = c("auc_fixed_crn_pct", "auc_adaptive_crn_pct", "auc_fixed_het_pct","auc_adaptive_het_pct"),
+    names_to = "method",
+    values_to = "auc_value"
+  )
+
+melted_df$auc = unlist(melted_df$auc_value)
+melted_df$method <- sub("auc_", "", melted_df$method)
+```
+
+
+```{r}
+ggplot(melted_df, aes(x = factor(init_npar), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nrep), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(sim_budget), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(grid_npar), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nTS_samp), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+```
+
+```{r}
+par(mfrow = c(3, 2))
+
+ggplot(melted_df, aes(x = factor(init_npar), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nrep), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(sim_budget), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(grid_npar), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nTS_samp), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+```
+
+
+```{r}
+nbest <- 20
+y1 <- res_adaptive_CRNGP$y_native
+y2 <- res_fixed_CRNGP$y_native
+labs = c("CRN-adaptive", "CRN-fixed")
+nerror_ticks=20
+
+y_df <- data.frame(y = c(y1[order(y1)][1:nbest], 
+                         y2[order(y2)][1:nbest]),
+                   type = rep(labs, each = nbest))
+
+error_ticks <- seq(0, max(y_df$y), length.out = nerror_ticks)
+pctraj_1 <- pctraj_2 <- rep(NA, nerror_ticks)
+
+for (ii in 1:nerror_ticks){
+  pctraj_1[ii] <- mean(y_df$y[y_df$type == labs[1]] < error_ticks[ii])
+  pctraj_2[ii] <- mean(y_df$y[y_df$type == labs[2]] < error_ticks[ii])
+}
+
+plot(error_ticks, pctraj_1, pch = 19, col = alpha("#F8766D", 01), type = "b", 
+     xlab = "sum-squared-error", ylab = "% best traj", main = paste("nbest = ", nbest))
+points(error_ticks, pctraj_2, pch = 19, col = alpha("#00BA38", 1), type = "b")
+legend("topleft", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+```
+
+
+```{r, fig.width=7, fig.height=3}
+par(mfrow = c(1, 3))
+area_under_curve(nbests, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+area_under_curve(nbests, res_adaptive_hetGP$y_native, res_fixed_hetGP$y_native, labs = c("het-adaptive", "het-fixed"))
+area_under_curve(nbests, res_adaptive_CRNGP$y_native, res_adaptive_hetGP$y_native, labs = c("CRN-adaptive", "het-adaptive"))
+```
+
+```{r}
+y1 <- res_adaptive_CRNGP$y_native
+y2 <- res_fixed_CRNGP$y_native
+threshold <- 200
+
+y1 <- sqrt(y1)
+y2 <- sqrt(y2)
+
+
+```
+
+
+```{r}
+library(laGP)
+x <- c(1, 2, 3, 4, 12)
+y <- c(0, -1.75, -2, -0.5, 5)
+
+gpi <- newGP(matrix(x, ncol=1), y, d=10, g=1e-8)
+xx <- seq(0, 13, length=1000)
+p <- predGP(gpi, matrix(xx, ncol=1), lite=TRUE)
+
+m <- which.min(y)
+fmin <- y[m]
+d <- fmin - p$mean
+s <- sqrt(p$s2)
+dn <- d/s
+ei <- d*pnorm(dn) + s*dnorm(dn)
+```

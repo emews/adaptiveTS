@@ -160,6 +160,6 @@ run_sim_err <- function(par){
   else
     rm(".Random.seed", envir = .GlobalEnv)
   
-  return(sum((out$n_SI - ytrue_vec)^2))
+  return(list(out=sum((out$n_SI - ytrue_vec)^2), res=out))
 }
 

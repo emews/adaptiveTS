@@ -10,10 +10,12 @@ library(data.table)
 library(lhs)
 library(ggplot2)
 library(mvtnorm)
+library(doParallel)
 
 source("../script/R/odin-sim.R")
 source("../script/R/adaptive_TS.R")
 source("../script/R/adaptive_TS_nonCRN.R")
+source("../script/R/adaptive_TS_seed.R")
 source("../script/R/plots.R")
 ```
 ## Ground truth
@@ -111,6 +113,15 @@ for (ii in 1:nrow(d_eff)){
                                         sim_func = run_sim_err, exp_seed = exp_seed, 
                                         covtype = "Matern5_2",
                                         adaptive = T)
+  
+  out_adaptive_CRNGP_seed <- TSBatchBO_CRNGP_seed(init_npar, nrep, p, 
+                                                  sim_budget = sim_budget, 
+                                                  grid_npar = grid_npar, 
+                                                  nTS_samp = nTS_samp, 
+                                                  ytrue = ytrue_full, 
+                                                  sim_func = run_sim_err, 
+                                                  exp_seed = exp_seed, 
+                                                  covtype = "Matern5_2")
   
   save(out_fixed_CRNGP,
        out_adaptive_CRNGP,

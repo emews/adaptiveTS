@@ -145,7 +145,8 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
     tt <- 2
     while(no_of_sims < sim_budget){
       # for (tt in 1:nTS_iter){
-      out <- next_eval_CRN_seed(Xgrid_01 = Xgrid_full_01,
+      out <- next_eval_CRN_seed(model = f,
+                                Xgrid_01 = Xgrid_full_01,
                                 nTS_samp = nTS_samp,
                                 evaluated_Xs = evaluated_Xs,
                                 nrep = nrep)
@@ -203,13 +204,15 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
 #' @export
 #'
 #' @examples
-next_eval_CRN_seed <- function(Xgrid_01,
+next_eval_CRN_seed <- function(model,
+                               Xgrid_01,
                                nTS_samp,
                                evaluated_Xs,
                                nrep){
   
   if(TRUE){
-    out <- adaptive_seed_CRN_TS(evaluated_Xs = evaluated_Xs,
+    out <- adaptive_seed_CRN_TS(model = model, 
+                                evaluated_Xs = evaluated_Xs,
                                 Xgrid_01 = Xgrid_01,
                                 nTS_samp = nTS_samp,
                                 nrep = nrep)
@@ -233,7 +236,8 @@ next_eval_CRN_seed <- function(Xgrid_01,
 #' @export
 #'
 #' @examples
-adaptive_seed_CRN_TS <- function(evaluated_Xs,
+adaptive_seed_CRN_TS <- function(model,
+                                 evaluated_Xs,
                                  Xgrid_01,
                                  nrep,
                                  nTS_samp){

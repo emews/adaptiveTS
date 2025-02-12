@@ -46,6 +46,7 @@ args <- parser$parse_args()
 source(paste0(args$r_path, "/odin-sim.R"))
 source(paste0(args$r_path, "/adaptive_TS.R"))
 source(paste0(args$r_path, "/adaptive_TS_nonCRN.R"))
+source(paste0(args$r_path, "/adaptive_TS_seed.R"))
 source(paste0(args$r_path, "/plots.R"))
 
 exp_path <- args$exp_path
@@ -116,5 +117,14 @@ out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budge
                                       err_sig = err_sig, prop_sig = prop_sig, 
                                       sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
                                       adaptive = T)
+
+out_adaptive_CRNGP_seed <- TSBatchBO_CRNGP_seed(init_npar, nrep, p, 
+                                                sim_budget = sim_budget, 
+                                                grid_npar = grid_npar, 
+                                                nTS_samp = nTS_samp, 
+                                                ytrue = ytrue_full, 
+                                                sim_func = run_sim_err, 
+                                                exp_seed = exp_seed, 
+                                                covtype = "Matern5_2")
 
 save.image(file = paste0(exp_path, "/", args$exp_id, "_", "out.RData"))

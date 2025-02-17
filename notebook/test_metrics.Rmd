@@ -12,10 +12,773 @@ library(data.table)
 library(lhs)
 library(ggplot2)
 library(mvtnorm)
+library(tidyr)
+library(dplyr)
+library(plotly)
 source("../script/R/odin-sim.R")
 source("../script/R/adaptive_TS.R")
 source("../script/R/adaptive_TS_nonCRN.R")
 source("../script/R/plots.R")
+source("../script/R/helpers.R")
+```
+
+
+### Setup
+```{r}
+# Read experiment config
+exp_path  <- "/lcrc/project/EMEWS/improv/abby/adaptiveTS/emews/experiments/big_experiment/results"
+config <- fread("/lcrc/project/EMEWS/improv/abby/adaptiveTS/emews/data/upfs/config.csv")
+config[, (ncol(config)) := NULL]
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+
+# Get true trajectory 
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue_sim <- run_sim(c(xtrue, strue))
+ytrue <-  ytrue_sim$n_SI
+
+ggplot(ytrue_sim) + 
+  geom_line(aes(x=step, y=n_SI))+
+  theme_minimal()
+```
+
+
+### 1. "How quickly do we find N trajectories under threshold T"
+- Need to identify reasonable thresholds
+- What does "how quickly" mean in this context
+
+```{r, fig.width=5}
+out_list <- load_outputs(100, exp_path, config)
+plot_thresholds(out_list, yobs)
+plot_threshold_search(out_list, par_true)
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+true_param <- data.frame(
+  rep = par_true[3],  # x-coordinate
+  p1 = par_true[1],  # y-coordinate
+  p2 = par_true[2],  # z-coordinate
+  iter = 1,
+  method = "true"  # Custom label (if needed)
+)
+
+# Base 3D scatter plot
+fig <- plot_ly(dfx, 
+               x = ~rep, y = ~p1, z = ~p2, color = ~method, type = "scatter3d", mode = "markers") %>%
+  add_trace(data = true_param, 
+            x = ~rep, y = ~p1, z = ~p2, 
+            type = "scatter3d", mode = "markers",
+            marker = list(size = 10, color = "black", symbol = "square"),
+            name = "true") %>%  # Custom legend label for the point
+  layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+  ))
+
+fig
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+true_param <- data.frame(
+  rep = par_true[3],  # x-coordinate
+  p1 = par_true[1],  # y-coordinate
+  p2 = par_true[2],  # z-coordinate
+  iter = 1,
+  rmse=1,
+  method = "true"  # Custom label (if needed)
+)
+
+# Base 3D scatter plot
+fig <- plot_ly(dfx, 
+               x = ~rep, y = ~p1, z = ~p2, color = ~rmse, type = "scatter3d", mode = "markers") %>%
+  add_trace(data = true_param, 
+            x = ~rep, y = ~p1, z = ~p2, 
+            type = "scatter3d", mode = "markers",
+            marker = list(size = 10, color = "black", symbol = "square"),
+            name = "true") %>%  # Custom legend label for the point
+  layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+  ))
+
+fig
+```
+
+
+```{r}
+ggplot(dfx %>% filter(iter>1) %>% group_by(method, iter) %>% count()) + 
+  geom_line(aes(x=iter, y=n, color=method, group=method))+
+  theme_minimal()
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+plot_ly(dfx, x = ~rep, y = ~p1, z = ~p2, color = ~method)
+plot_ly(dfx %>% filter(method %in% c('adaptive_crn', 'fixed_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('adaptive_het', 'fixed_het')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('adaptive_het', 'adaptive_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('fixed_het', 'fixed_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+```
+
+
+```{r message=FALSE, warning=FALSE}
+exp_list <- 1:990
+thresholds <- c(15, 20, 25, 30)
+n4checkpoint <- c(10, 25, 50)
+
+analysis_list <- lapply(exp_list, function(x) {
+    analyze_experiment(x, exp_path=exp_path, config=config, thresholds=thresholds, n_trajectories=n4checkpoint)
+})
+
+# Assuming each `analyze_experiment` returns a list of 3 data frames,
+# separate them by extracting each corresponding index
+threshold_cnt <- do.call(rbind, lapply(analysis_list, `[[`, 1))
+checkpoint_reached <- do.call(rbind, lapply(analysis_list, `[[`, 2))
+threshold_budget_auc <- do.call(rbind, lapply(analysis_list, `[[`, 3))
+threshold_budget_path <- do.call(rbind, lapply(analysis_list, `[[`, 4))
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+ggplot(threshold_cnt, aes(x=factor(threshold), y=num_trajectories, fill=method)) + 
+  #geom_bar(stat="summary", position="dodge") + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  geom_boxplot() +
+  facet_wrap(~sim_budget, ncol=1, 
+             labeller = labeller(sim_budget = function(x) paste('budget=', x)), scales = "free_y")+
+  xlab('Threshold (RMSE)') +
+  ylab('Number trajectories found') +
+  theme_minimal()
+
+threshold_cnt$pct_traj <- threshold_cnt$num_trajectories/threshold_cnt$sim_budget
+
+ggplot(threshold_cnt, aes(x=factor(threshold), y=pct_traj, fill=method)) + 
+  #geom_bar(stat="summary", position="dodge") + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  geom_boxplot() +
+  xlab('Threshold (RMSE)') +
+  ylab('Prop. of budget under threshold') +
+  facet_wrap(~sim_budget, ncol=1, labeller = labeller(sim_budget = function(x) paste('budget=', x)))+
+  theme_minimal()
+```
+
+
+Split by budget:
+```{r}
+threshold_cnt$method <- as.factor(threshold_cnt$method)
+
+b200 <-  threshold_cnt %>% filter(sim_budget==200)
+b500 <- threshold_cnt %>% filter(sim_budget==500)
+b700 <- threshold_cnt %>% filter(sim_budget==700)
+```
+
+
+```{r}
+b200 %>% 
+  filter(threshold==30) %>%
+  plot_ly() %>% 
+  add_trace(x = ~as.numeric(method), y = ~pct_traj, type = "box", 
+            hoverinfo = 'name+y',
+            line = list(color = "black"),   # Black outline for the boxplot
+            fillcolor = "rgba(0,0,0,0)",    # Transparent fill (no fill)
+            boxpoints=FALSE) %>% 
+  add_markers(x = ~jitter(as.numeric(method)), y = ~pct_traj, color = ~factor(nrep),
+              marker = list(size = 6),
+              hoverinfo = "text",
+              text = ~paste0("method: ",method,
+                             "<br>pct<t: ",round(pct_traj, 3),
+                             "<br>exp_seed: ", exp_seed,
+                             "<br>init_npar: ", init_npar,
+                             "<br>nrep: ", nrep,
+                             "<br>grid_npar: ", grid_npar,
+                             "<br>nTS_samp: ", nTS_samp
+                             ),
+              showlegend = FALSE) %>% 
+  layout(legend = list(orientation = "h",
+                       x =0.5, xanchor = "center",
+                       y = 1, yanchor = "bottom"
+                       ),
+        xaxis = list(title = "Method",
+                      tickmode = "array",
+                      tickvals = as.numeric(unique(b700$method)),  # Numeric x-values
+                      ticktext = unique(b700$method),  # Corresponding categorical labels
+                      showticklabels = TRUE))
+
+```
+
+
+```{r}
+ggplot(threshold_cnt, aes(x=exp_seed,y=pct_traj, colour=method)) +
+  stat_smooth(method="loess", se=TRUE, aes(fill=method), alpha=0.3) +
+  facet_grid(sim_budget~threshold) +
+  theme_bw()
+
+ggplot(threshold_cnt, aes(x=factor(nrep),y=pct_traj, colour=method)) +
+  geom_boxplot() +
+  facet_grid(sim_budget~threshold) +
+  theme_bw()
+```
+
+```{r, fig.width=5}
+# Ensure pct_cat is a factor for coloring
+t = 25
+threshold_cnt %>%
+  filter(threshold == t) %>%
+  pivot_longer(cols = c(init_npar, nrep, grid_npar, nTS_samp), names_to = "parameter", values_to = "val") %>%
+  ggplot(aes(x = factor(val), y = pct_traj, fill = method)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +  # Black outline, no default outliers
+  ylab('Prop. of budget under threshold') +
+  xlab('Parameter value') +
+  facet_grid(sim_budget~parameter, scales='free_x')  +
+  ggtitle(paste('Threshold =', t)) +
+  theme_minimal()
+  # Facet by variable
+  #labs(x = "Parameter Values", y = "pct_traj", title = "Boxplots of pct_traj by Parameters") +
+  #theme_minimal() +
+  #theme(legend.position = "right")
+
+```
+
+
+Dig into this more, e.g., the budget 200 with 60% good what was up, 
+
+```{r}
+checkpoint_reached
+```
+
+
+```{r message=FALSE, warning=FALSE}
+checkpoint_reached$proportion_checkpointed = ifelse(checkpoint_reached$checkpoint==-1, 0, 1)
+
+ggplot(checkpoint_reached, aes(x=threshold, y=proportion_checkpointed, fill=method)) + 
+  geom_bar(stat='summary', position="dodge") + 
+  facet_wrap(~n_trajectories + sim_budget, labeller = labeller(n_trajectories = function(x) paste(x, 'trajectories'), sim_budget = function(x) paste('budget=', x))) +
+  theme_minimal()
+```
+
+```{r}
+checkpoint_reached$method = factor(checkpoint_reached$method)
+
+checkpoint_reached %>% 
+  filter(sim_budget==700, threshold==15) %>%
+  plot_ly() %>% 
+  add_trace(x = ~as.numeric(method), y = ~checkpoint, type = "box", 
+              hoverinfo = 'name+y',
+              line = list(color = "black"),   # Black outline for the boxplot
+              fillcolor = "rgba(0,0,0,0)",    # Transparent fill (no fill)
+              boxpoints=FALSE) %>% 
+    add_markers(x = ~jitter(as.numeric(method)), y = ~checkpoint, color = ~nrep,
+                marker = list(size = 6),
+                hoverinfo = "text",
+                text = ~paste0("method: ",method,
+                               "<br>pct<t: ",round(checkpoint, 3),
+                               "<br>exp_seed: ", exp_seed,
+                               "<br>init_npar: ", init_npar,
+                               "<br>nrep: ", nrep,
+                               "<br>grid_npar: ", grid_npar,
+                               "<br>nTS_samp: ", nTS_samp
+                               ),
+                showlegend = FALSE) %>% 
+    layout(legend = list(orientation = "h",
+                         x =0.5, xanchor = "center",
+                         y = 1, yanchor = "bottom"
+                         ),
+          xaxis = list(title = "Method",
+                        tickmode = "array",
+                        tickvals = as.numeric(unique(b700$method)),  # Numeric x-values
+                        ticktext = unique(b700$method),  # Corresponding categorical labels
+                        showticklabels = TRUE))
+```
+
+```{r, fig.width=5}
+ggplot(checkpoint_reached %>% filter(threshold==20, n_trajectories==50))+
+  geom_density(aes(x=checkpoint, fill=factor(nrep)), alpha=.4) +
+  facet_grid(sim_budget~method, scales="free_y")
+    
+```
+
+
+```{r}
+ggplot(threshold_budget_path %>% filter(exp_id==100), aes(x=time, y=trajectories_found, color=method, group=method)) + 
+  #stat_smooth(method="loess", se=TRUE, aes(fill=method), alpha=0.3)  + 
+  geom_line() +
+  facet_wrap(~threshold, ncol=4) + 
+  theme_minimal()
+
+```
+
+Why is purple higher than green? Why is blue so low?
+```{r message=FALSE, warning=FALSE, fig.width=5, fig.height=2}
+ggplot(threshold_budget_auc, aes(x=threshold, y=auc, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") + 
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~sim_budget, labeller = labeller(sim_budget = function(x) paste('budget=', x)), scale='free_y')+
+  theme_minimal()
+```
+
+
+```{r}
+threshold_budget %>%
+    group_by(method, threshold) %>%
+    summarise(
+        n =n(), 
+        mean_auc = mean(auc),
+        std = sd(auc),
+        lower_ci = mean_auc - qt(0.975, df=n()-1) * sd(auc) / sqrt(n()),
+        upper_ci = mean_auc + qt(0.975, df=n()-1) * sd(auc) / sqrt(n())
+    )
+
+```
+```{r}
+pm <- ggpairs(
+  idk[,3:ncol(idk)],
+  mapping = ggplot2::aes(color = cut),
+  upper = list(continuous = wrap("density", alpha = 0.5), combo = "box_no_facet"),
+  lower = list(continuous = wrap("points", alpha = 0.3), combo = wrap("dot_no_facet", alpha = 0.4)),
+  title = "Diamonds"
+)
+```
+
+
+```{r}
+# Convert to long format for ggplot
+df_long <- reshape2::melt(idk[,3:ncol(idk)], id.vars = "auc")
+
+ggplot(df_long, aes(value, auc)) +
+  geom_point(aes(color = auc)) +
+  facet_wrap(~ variable, scales = "free") +
+  scale_color_viridis_c()
+```
+
+```{r message=FALSE, warning=FALSE}
+idk = threshold_budget %>% filter(method=='adaptive_crn', threshold==15)
+idk = idk %>%
+    mutate(auc_category = cut(auc, 
+                              breaks = quantile(auc, probs = seq(0, 1, 0.2), na.rm = TRUE),
+                              labels = c("Very Low", "Low", "Medium", "High", "Very High"),
+                              include.lowest = TRUE))
+
+ggpairs(idk, columns=5:10, mapping = aes(color = auc_category)) + 
+  scale_color_manual(values = c("blue", rep("purple", 4), "red")) 
+```
+
+
+```{r}
+ggplot(threshold_budget, aes(x=threshold, y=auc, fill=method)) + 
+  geom_bar(stat="summary", fun="mean", position="dodge") + 
+  geom_errorbar(stat="summary", fun.data=mean_sdl, fun.args=list(mult=1), position="dodge")
+
+```
+
+
+
+  
+
+  
+```{r}
+dff = dfx %>% filter(iter > 1, method %in% c('fixed_crn', 'fixed_het')) %>% group_by(method, p1, p2) %>% count(sort=TRUE) %>% mutate(logn=log(n))
+
+ggplot(dff)+ 
+  geom_point(aes(x = p1, y = p2, color=n), size=5) +
+  geom_point(data=data.frame(p1=par_true[1], p2=par_true[2], rep=par_true[3]), aes(x=p1, y=p2), color='red', fill='red', size=3, shape=23) +
+  facet_wrap(~method) +
+  theme_minimal() 
+  
+```
+  
+```{r}
+ggplot(dfx, aes(x = p1, y = p2, color=rmse)) +
+  geom_density_2d_filled(alpha = 0.5) +
+  facet_wrap(~method) +
+  theme_minimal() 
+```
+
+
+
+
+
+```{r}
+
+
+ggplot(dfx, aes(x = p1, y = p2, color=rmse)) +
+  geom_point(size=3, alpha=.5) + 
+ #scale_color_gradient(low = "gold", high = "cornflowerblue") +
+  theme_minimal() 
+  #geom_density_2d_filled(alpha = 0.5)
+```
+
+
+
+```{r}
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+
+```
+
+
+```{r}
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- 0
+  for (i in 1:n) {
+    fitness <- fitness + sqrt(sum(simout[,i] - yobs)^2)
+  }
+  fitness <- fitness/n
+  
+  #mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+```
+
+
+```{r}
+energy_score <- function(simout, yobs) {
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- 0
+  for (i in 1:n) {
+    fitness <- fitness + sqrt(sum(simout[,i] - yobs)^2)
+  }
+  fitness <- fitness/n
+  
+  #mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+  return(fitness-pairwise)
+}
+```
+
+
+# Example usage:
+set.seed(42)
+N <- 100  # Number of samples
+M <- 10   # Number of time steps
+
+# Simulate some trajectory samples (N x M matrix)
+x_samples <- matrix(rnorm(N * M, mean = 0, sd = 1), nrow = N, ncol = M)
+
+# Simulated observed trajectory
+y_observed <- rnorm(M, mean = 0, sd = 1)
+
+# Compute Energy Score
+ES_value <- energy_score(x_samples, y_observed)
+print(ES_value)
+```
+
+
+```{r}
+threshold_budget(out_list, show_plots=TRUE)
+```
+
+
+```{r}
+nbests <- c(10, 25, 50, 75, 100)
+
+combine_nbests <- function(out_list, nbests) {
+  all_results <- list()
+  for (i in seq_along(nbests)) {
+    result <- lapply(out_list, function(out) nbest_mean(nbest = nbests[[i]], out = out))
+    result$nbest <- nbests[[i]]
+    all_results[[i]] <- result
+  }
+  
+  
+  combined_df <- do.call(rbind, lapply(all_results, function(x) {
+    df <- as.data.frame(x)
+    return(df)
+  }))
+  
+  return(combined_df)
+}
+
+
+analyze_exp <- function(exp_id, exp_path, nbest_list=c(10, 25, 50, 75, 100)){
+  out_list <- load_outputs(exp_id, exp_path)
+  df <- combine_nbests(out_list, nbest_list)
+  df$exp_id <- exp_id
+  return(df)
+}
+```
+
+
+```{r message=FALSE, warning=FALSE}
+exp_list <- 1:990
+
+result_df <- do.call(rbind, lapply(exp_list, function(x) {
+    df <- analyze_exp(x, exp_path=exp_path)
+    return(df)
+  }))
+```
+
+
+
+
+
+```{r}
+out_list <- load_outputs(1, exp_path)
+nbest_pct(25, out_list$adaptive_crn$y_rmse, 25)
+
+plot(1:20, nbest_pct(25, out_list$adaptive_crn$y_rmse, 25)$)
+```
+
+
+```{r}
+plot_nbest_traj(100, out_list$fixed_crn, out_list$adaptive_crn, ytrue)
+```
+
+
+```{r}
+result_df['best_method'] = apply(result_df[, 1:4], 1, which.min)
+result_df$best_method <- colnames(result_df)[result_df$best_method]
+table(result_df$best_method,result_df$nbest)
+```
+
+
+
+```{r}
+melted_df <- result_df %>%
+  pivot_longer(
+    cols = c("fixed_crn", "adaptive_crn", "fixed_het",  "adaptive_het"),
+    names_to = "method",
+    values_to = "rmse"
+  )
+```
+
+Merge in configs:
+```{r}
+exp_config <- read.csv("/lcrc/project/EMEWS/improv/abby/adaptiveTS/emews/data/upfs/config.csv")
+exp_config <- exp_config[, -ncol(exp_config)]
+exp_config$exp_id <- as.numeric(gsub("exp_", "", exp_config$exp_id))
+
+df <- merge(melted_df, exp_config)
+
+df
+```
+
+
+
+```{r}
+ggplot(melted_df, aes(x=factor(nbest), y=rmse, fill=method)) + 
+  geom_boxplot(position = position_dodge(width = 0.8))+
+  theme_bw()
+
+ggplot(melted_df, aes(x=factor(nbest), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  theme_minimal()
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+ggplot(df, aes(x=factor(sim_budget), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest), ncol=5) +
+  theme_minimal()
+
+ggplot(df, aes(x=factor(init_npar), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest), ncol=5) +
+  theme_minimal()
+```
+
+```{r message=FALSE, warning=FALSE}
+ggplot(df, aes(x=sim_budget, y=rmse, fill=method, color=method)) + 
+  geom_point(stat="summary", position="dodge") +
+  geom_line(aes(x=sim_budget, y=rmse, color=method)) + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest)) +
+  theme_minimal()
+```
+
+
+
+```{r}
+ggplot(df, aes(x=factor(exp_seed), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  theme_bw()
+```
+
+
+
+```{r}
+ggplot(df, aes(x = factor(init_npar), y = rmse, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+```
+
+
+```{r}
+df %>% filter(nbest==25, sim_budget==200) %>%
+  group_by(method, init_npar) %>%
+  summarize(rmse = mean(rmse))
+
+```
+
+
+Just do the AUC for the two  metrics:
+```{r}
+nbest_pct(100, out$fixed_het$y_rmse, 100)
+```
+
+
+```{r}
+
+auc_trapezoids<- function(y){
+  x <- seq_along(y)
+  # want zero to be reference
+  auc <- sum((y[-1] + y[-length(y)]) * diff(x) / 2)
+  return(auc)
+}
+
+
+
+exp_id <- 5
+
+outfile <- sprintf("%s/exp_%s_out.RData", exp_path, exp_id)
+
+temp_env <- new.env()
+load(outfile, envir = temp_env)
+out_fixed_CRNGP <- temp_env$out_fixed_CRNGP
+out_adaptive_CRNGP <- temp_env$out_adaptive_CRNGP
+out_fixed_hetGP <- temp_env$out_fixed_hetGP
+out_adaptive_hetGP <- temp_env$out_adaptive_hetGP
+
+res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
+res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
+res_fixed_hetGP <- collect_results(out_fixed_hetGP)
+res_adaptive_hetGP <- collect_results(out_adaptive_hetGP)
+
+  y_fixed_crn <- res_fixed_CRNGP$y_native
+  y_adapt_crn <-  res_adaptive_CRNGP$y_native
+  y_fixed_het <-  res_fixed_hetGP$y_native
+  y_adapt_het <-  res_adaptive_hetGP$y_native
+  
+  
+  # negative makes auc weird
+
+  
+  #y_fixed_crn <- y_fixed_crn - ymin
+  #y_adapt_crn <- y_adapt_crn - ymin
+  #y_fixed_het <- y_fixed_het - ymin
+  #y_adapt_het <- y_adapt_het - ymin
+  
+  res_fixed_crn <- best_so_far(y_fixed_crn, m=nbest, n=n)
+  res_adaptive_crn <- best_so_far(y_adapt_crn, m=nbest, n=n)
+  res_fixed_het <- best_so_far(y_fixed_het, m=nbest, n=n)
+  res_adaptive_het <- best_so_far(y_adapt_het, m=nbest, n=n)
+  
+   ymin <- min(res_fixed_crn, res_adaptive_crn, res_fixed_het, res_adaptive_het)
+  ymax <- max(res_fixed_crn, res_adaptive_crn, res_fixed_het, res_adaptive_het)
+  
+  labs = c("CRN-adaptive", "CRN-fixed", "Het-adaptive", "Het-fixed")
+  xax_fixed_crn = (1:length(res_fixed_crn)) + n
+  xax_adapt_crn = (1:length(res_adaptive_crn)) + n
+  xax_fixed_het = (1:length(res_fixed_het)) + n
+  xax_adapt_het = (1:length(res_adaptive_het)) + n
+  
+  plot(xax_adapt_crn, res_adaptive_crn, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("Experiment", exp_id))
+  points(xax_fixed_crn, res_fixed_crn, pch = 19, col = alpha("#00BA38", 1), type = "l")
+  points(xax_adapt_het, res_adaptive_het, pch = 19, col = alpha("#4287f5", 1), type = "l")
+  points(xax_fixed_het, res_fixed_het, pch = 19, col = alpha("#f5c842", 1), type = "l")
+  legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38", "#4287f5", "#f5c842"))
+
+  
+  auc_fixed_crn <- auc_trapezoids(res_fixed_crn)
+  auc_adapt_crn <- auc_trapezoids(res_adaptive_crn)
+  auc_fixed_het <- auc_trapezoids(res_fixed_het)
+  auc_adapt_het <- auc_trapezoids(res_adaptive_het)
+  
+  auc_out <- list(auc_fixed_crn=auc_fixed_crn,
+               auc_adapt_crn=auc_adapt_crn,
+               auc_fixed_het=auc_fixed_het,
+               auc_adapt_het=auc_adapt_het,
+               #auc_delta=(auc_adapt-auc_fixed)/auc_fixed,
+               auc_fixed_crn_pct = auc_fixed_crn/((ymax-ymin) * length(res_fixed_crn)),
+               auc_adaptive_crn_pct = auc_adapt_crn/((ymax-ymin) * length(res_adaptive_crn)),
+               auc_fixed_het_pct = auc_fixed_het/((ymax-ymin) * length(res_fixed_het)),
+               auc_adaptive_het_pct = auc_adapt_het/((ymax-ymin) * length(res_adaptive_het)))
+```
+
+
+```{r}
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, 
+                        res_fixed_CRNGP$x_mat, 
+                        res_adaptive_CRNGP$x_mat, 
+                        res_fixed_CRNGP$y_vec, 
+                        res_adaptive_CRNGP$y_vec, 
+                        yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+```
+
+
+```{r, fig.width=14, fig.height=7}
+nbests <- seq(20, sim_budget, length.out = 6)
+par(mfrow = c(2, 3))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+}
 ```
 
 
@@ -169,6 +932,8 @@ nbest = 10
 
 res_fixed <- best_so_far(res_fixed_CRNGP$y_native, m=nbest, n=n)
 res_adaptive <- best_so_far(res_adaptive_CRNGP$y_native, m=nbest, n=n)
+res_fixed_het <- best_so_far(res_fixed_hetGP$y_native, m=nbest, n=n)
+res_adaptive_het <- best_so_far(res_adaptive_hetGP$y_native, m=nbest, n=n)
 
 labs = c("CRN-adaptive", "CRN-fixed")
 xax_fixed = (1:length(res_fixed)) + n
@@ -376,6 +1141,7 @@ melted_df <- result_df[,cols] %>%
 melted_df$auc = unlist(melted_df$auc_value)
 melted_df$method <- sub("auc_", "", melted_df$method)
 ```
+
 
 
 ```{r}

@@ -251,15 +251,24 @@ adaptive_seed_CRN_TS <- function(model,
   
   ## remove already evaluted points
   evaluated_ids <- find_row_indices(Xsgrid, evaluated_Xs)
-  eff_grid <- Xsgrid[-evaluated_ids, ]
+  # eff_grid <- Xsgrid[-evaluated_ids, ]
   
   ## predict
-  pred <- predict(model, eff_grid, xprime = eff_grid)
-  tTS <- MASS::mvrnorm(n = nTS_samp, 
-                       mu = pred$mean, 
-                       Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  # pred <- predict(model, eff_grid, xprime = eff_grid)
+  # tTS <- MASS::mvrnorm(n = nTS_samp,
+  #                      mu = pred$mean,
+  #                      Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  tTS <- simul(object = model, Xsgrid, ids = evaluated_ids,
+               nsim = nTS_samp, check = F)
   
-  best_ids <- apply(tTS, 1, which.min)
+  # best_ids <- apply(tTS, 1, which.min)
+  best_ids <- apply(tTS, 2, function(x){
+    m_tmp <- cbind(x, 1:length(x))
+    m_tmp <- m_tmp[-evaluated_ids, ]
+    ids <- which.min(m_tmp[, 1])
+    native_ids <- m_tmp[ids, 2]
+    return(native_ids)
+  })
   best_ids <- sort(unique(best_ids))
   
   return(eff_grid[best_ids, ])

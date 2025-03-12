@@ -1,0 +1,152 @@
+global.random.seed = 100
+
+stop.at = 2256
+
+# full week
+#stop.at = 168.1
+
+#stop.at = 840.1
+
+# 2 years
+#stop.at = 17520
+
+# 36 weeks
+#stop.at = 6048.1
+
+# stop.at = 8736.1
+
+run = 1
+
+#persons.file = /home/nick/Documents/chiSIM_Input/zip_60615_for_4p/persons_ns.csv
+#places.file = /home/nick/Documents/chiSIM_Input/zip_60615_for_4p/places_ns.csv
+#activities.file = /home/nick/Documents/chiSIM_Input/zip_60615_for_4p/activities_ns.csv
+
+#persons.file = /projects/CVD_Research/ncollier/data/chiSim_Input_NS/chicago_for_128p/persons_ns.csv
+#places.file = /projects/CVD_Research/ncollier/data/chiSim_Input_NS/chicago_for_128p/places_ns.csv
+#activities.file = /projects/CVD_Research/ncollier/data/chiSim_Input_NS/chicago_for_128p/activities_ns.csv
+
+#persons.file = /projects/CVD_Research/ncollier/data/covid_input/chicago_v2_lb6/persons_256p.csv
+#places.file = /projects/CVD_Research/ncollier/data/covid_input/chicago_v2_lb6/places_256p.csv
+#activities.file = /projects/CVD_Research/ncollier/data/covid_input/chicago_v2_lb6/activities_v2.csv
+#school.types.file = /projects/CVD_Research/ncollier/data/covid_input/chicago_v2_lb6/school_types_256p.csv
+#school.workers.file = /projects/CVD_Research/ncollier/data/covid_input/chicago_v2_lb6/school_bins_256p.csv
+
+persons.file = /lcrc/project/EMEWS/data/v3/2b/per_2b.csv
+places.file = /lcrc/project/EMEWS/data/v3/2b/pl_2b.csv
+activities.file = /lcrc/project/EMEWS/data/v3/2b/act.csv
+school.types.file = /lcrc/project/EMEWS/data/v3/2b/school_types_2b.csv
+school.workers.file = /lcrc/project/EMEWS/data/v3/2b/school_bins_2b.csv
+
+synth.pop.version = v3
+# intervention.ptype.all_but_school = workplace,gym,other household
+intervention.ptype.all_but_school = workplace,other household,restaurant,supermarket,store,convenience store,place of worship,recreation,nursing home,library,hospital,museum
+
+essential.workers.file = /lcrc/project/EMEWS/data/v3/groups/essential_workers_chi.csv
+essential.workers.work.prob = 1.0
+
+# total NOT per process
+infected.count = 20
+
+d10 = 400
+
+susceptible.to.exposed.probability = 0.05
+
+seasonality.multiplier = 0.3
+# day of the year 
+seasonality.peak = 60
+
+shielding.scaling = 1.0
+
+exposed.duration.mean = 3.5
+exposed.duration.k = 6
+
+asymptomatic.duration.mean = 10
+asymptomatic.duration.k = 6
+
+presymptomatic.duration.mean = 2.5
+presymptomatic.duration.k = 6
+
+nh.tor.duration.mean = 7.5
+nh.tor.duration.k = 6
+
+nh.tod.duration.mean = 10
+nh.tod.duration.k = 6
+
+severe.duration.mean = 5
+severe.duration.k = 6
+
+hospital.recovered.duration.mean = 6.5
+hospital.recovered.duration.k = 6
+
+hospital.icu.recovered.duration.mean = 2
+hospital.icu.recovered.duration.k = 6
+
+hospital.icu.dead.duration.mean = 1.9
+hospital.icu.dead.duration.k = 6
+
+hospital.dead.duration.mean = 7.72
+hospital.dead.duration.k = 6
+
+icu.recovered.duration.mean = 8.5
+icu.recovered.duration.k = 6
+
+icu.dead.duration.mean = 9
+icu.dead.duration.k = 6
+
+etoa.probabilities.0_10 = 0.938842105
+etoa.probabilities.10_20 = 0.946369231
+etoa.probabilities.20_30 = 0.705574324
+etoa.probabilities.30_40 = 0.332183908
+etoa.probabilities.40_50 = 0.386267606
+etoa.probabilities.50_60 = 0.17
+etoa.probabilities.60_70 = 0.01
+etoa.probabilities.70_80 = 0
+etoa.probabilities.80p = 0
+
+ptoi.probabilities.0_10 = 0,1
+ptoi.probabilities.10_20 = 0.018209,0.981594
+ptoi.probabilities.20_30 = 0.028904,0.970295
+ptoi.probabilities.30_40 = 0.04065,0.958415
+ptoi.probabilities.40_50 = 0.056908,0.941765
+ptoi.probabilities.50_60 = 0.079299,0.918741
+ptoi.probabilities.60_70 = 0.113108,0.883867
+ptoi.probabilities.70_80 = 0.146543,0.846105
+ptoi.probabilities.80p = 0.190798,0.783975
+
+stoh.probabilities.0_10 = 0.713755,0.263941,0.011152
+stoh.probabilities.10_20 = 0.713755,0.263941,0.011152
+stoh.probabilities.20_30 = 0.716686,0.250368,0.010309
+stoh.probabilities.30_40 = 0.657858,0.293586,0.021021
+stoh.probabilities.40_50 = 0.632702,0.290031,0.031014
+stoh.probabilities.50_60 = 0.614277,0.275698,0.040287
+stoh.probabilities.60_70 = 0.592213,0.198349,0.069923
+stoh.probabilities.70_80 = 0.554003,0.135182,0.114146
+stoh.probabilities.80p = 0.472856,0.086117,0.114019
+
+# susceptible to exposed probability multipliers by age group
+stoe.multiplier.0_10 = 0.075
+stoe.multiplier.10_20 = 0.103448276
+stoe.multiplier.20_30 = 0.6
+stoe.multiplier.30_40 = 1.08974359
+stoe.multiplier.40_50 = 1.230769231
+stoe.multiplier.50_60 = 1.493333333
+stoe.multiplier.60_70 = 1.846153846
+stoe.multiplier.70_80 = 1.872340426
+stoe.multiplier.80p = 1.777777778
+
+# an infected person counts as 1 with respect to
+# calculating the infectivity of a place. These
+# values specify that value for an isolated person
+# in the specified places
+isolate.infectivity.household = 0.2
+isolate.infectivity.dorm = 0.1
+isolate.infectivity.nursinghome = 0.1
+
+output.directory = .
+disease.state.counts.file = ./output/counts.csv
+disease.state.new.counts.file = ./output/new_counts.csv
+place.exposure.counts.file = ./output/exposure_counts.csv
+reff.data.file = ./output/reff_data.csv
+zip.stats.file = ./output/infections_by_zip.csv
+
+reff.logging.threshold = 0

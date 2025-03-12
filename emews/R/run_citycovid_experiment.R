@@ -9,6 +9,7 @@ library(reticulate)
 library(EQ.SQL)
 
 source(paste0(args$r_path, "/adaptive_TS_citycovid.R"))
+gt_h_file <- "../experiments/data/dt.chicago.hosp.csv"
 
 ## =================================
 ## BO experiment settings 

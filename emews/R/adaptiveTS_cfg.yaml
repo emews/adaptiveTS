@@ -1,0 +1,36 @@
+#### IMPROV #### 
+db_path: /lcrc/project/EMEWS/improv/ncollier/dbs/snl_db
+db_host: ilogin4.lcrc.anl.gov
+db_user: eqsql_user
+db_name: EQSQL
+db_port: 54321
+
+pool_launch_script: ../swift/improv_worker_pool.sh
+pool_cfg_file: ../data/cfgs/improv_worker_pool.cfg
+pool_type: non_local
+results_directory: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/results
+python_path: /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/python-3.11.6-v7avskv/bin/python3
+
+#### LOCAL ####
+
+# db_path: /home/nick/db/music
+# db_host: localhost
+# db_user: eqsql_user
+# db_name: eqsql
+# db_port: -1
+
+# pool_launch_script: ../swift/run_music_worker_pool.sh
+# pool_cfg_file: ../swift/cfgs/music_worker_pool.cfg
+# results_directory: ../results
+# pool_type: local
+# python_path: /home/nick/miniconda3/envs/emews-py3.11/bin/python3
+
+
+#### COMMON ####
+
+worker_pool_id: default
+task_type: 1001
+gt_h_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/dt.chicago.hosp.csv
+ts_r_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/R/adaptiveTS_citycovid.R
+
+

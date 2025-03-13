@@ -91,11 +91,10 @@ input_str  = '{}'.format(json.dumps(params))
       string p_code = param_code_t % (task_payload, tick0_date, school_closure_date,
                                       stay_at_home_date, instance);
       string json_str = python_persist(p_code, "input_str");
-      printf(json_str);
+      // printf(json_str);
       @par=procs_per_run covid_model_run(model_props, json_str) =>
       // TODO: instance + counts file, if that's the appropriate one
       result = instance + "/output/counts_r1.csv";
-      
   }
 }
 

@@ -312,7 +312,7 @@ generate_payload <- function(params) {
 #'
 #' @return List containing outputs, simulation details, etc.
 #' @export
-submit_emews <- function(params, gt_h_file, task_queue, exp_id, task_type) {
+submit_emews <- function(design_points, gt_h_file, task_queue, exp_id, task_type) {
   # Submit all tasks to EMEWS
   fts <- apply(design_points, 1, function(a) {
     payload <- generate_payload(a)
@@ -332,9 +332,11 @@ submit_emews <- function(params, gt_h_file, task_queue, exp_id, task_type) {
   eq_ids <- sapply(results$f_results, function(x) x$eq_task_id)
   eq_ids <- unlist(eq_ids)
   outfiles <- sapply(results$f_results[order(eq_ids)], function(x) x$data)
+  print(outfiles)
   
   # Calculate loss/output values from result files
   y <- unlist(lapply(outfiles, obj_h, gt_h_file = gt_h_file))
+  print(y)
   
   return(y)
 }
@@ -421,8 +423,9 @@ runAdaptiveTS <- function(exp_design,
   Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
   
   # Evaluate initial design
+  print("Submitting Initial Design")
   y <- submit_emews(Xs_01, gt_h_file, task_queue, exp_id, task_type)
-
+  print("Finished Initiail Design Evaluation")
   
   # Standardize output
   y_std <- scale(log(y))
@@ -450,6 +453,7 @@ runAdaptiveTS <- function(exp_design,
   
   # TS starts here
   tt <- 2
+  print("Starting Iterative Evaluations")
   while(no_of_sims < sim_budget){
     # for (tt in 1:nTS_iter){
     out <- next_eval_CRN(model = f,

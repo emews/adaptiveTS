@@ -64,3 +64,4 @@ swift_proj/data/external_data/*
 !swift_proj/data/external_data/.keep
 
 experiments/
+results/

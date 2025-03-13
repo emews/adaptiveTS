@@ -263,12 +263,19 @@ find_row_indices <- function(bigger_matrix, smaller_matrix) {
   return(match_indices)
 }
 
+scale_params <- function(x, bounds){
+  return(bounds[1] + x*(bounds[2]-bounds[1]))
+}
+
 #' Format parameters to EMEWS payload
 #'
 #' @param params vector of parameters to update payload
 
 #' @return json string in correct format
-generate_payload <- function(params) {
+generate_payload <- function(params, 
+                             bounds=list(c(.01, .15), 
+                                         c(0.1, 1),
+                                         c(0.01, 0.5))) {
   # fixed
   fixed_params <- list(
     "infected.count" = 443.6,
@@ -279,11 +286,11 @@ generate_payload <- function(params) {
     "initial.exposure.tick" = 72 #day 3, right?
   )
   
-  # inputs (must be in this order)
+  # scaled inputs (must be in this order)
   var_params <- list(
-    "susceptible.to.exposed.probability" = params[1],
-    "stay.at.home.probability" = params[2],
-    "stoe.behavioral.adjustment.probability" = params[3],
+    "susceptible.to.exposed.probability" = scale_params(params[1], bounds[[1]]),
+    "stay.at.home.probability" = scale_params(params[2], bounds[[2]]),
+    "stoe.behavioral.adjustment.probability" = scale_params(params[3], bounds[[3]]),
     "seed" = params[4]
   )
   

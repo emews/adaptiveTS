@@ -21,7 +21,10 @@ exp_design <- list(
   nrep = 2,         # Number of replications
   grid_npar = 10,    # Number of candidate points for grid
   nTS_samp = 100,    # Number of Thompson samples
-  p = 3             # Dimension of the input space
+  p = 3,           # Dimension of the input space
+  err_sig = 0.5,
+  prop_sig = 1, # 0.3,
+  ref = -2
 )
 
 ## =================================
@@ -81,10 +84,10 @@ run <- function(exp_id, params) {
   }, finally = {
     # shut down EMEWS DB etc
     if (params$pool_type == "local") {
-      print("Closing queue")
-      if (!is.null(task_queue)) task_queue$close()
-      print("Canceling pool")
-      if (!is.null(pool)) pool$cancel()
+        print("Closing queue")
+        if (!is.null(task_queue)) task_queue$close()
+        print("Canceling pool")
+        if (!is.null(pool)) pool$cancel()
 
     } else if (!is.null(task_queue)) {
         # pool$cancel seems to hang on improv with pbs
@@ -107,9 +110,8 @@ if (params$db_port == -1) {
 
 source(params$ts_r_file)
 
-if (!file.exists(params$results_directory)){
+if (!file.exists(params$results_directory)) {
     dir.create(params$results_directory)
 }
 
 run(exp_id, params)
-

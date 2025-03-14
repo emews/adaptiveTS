@@ -116,6 +116,8 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
       }
     }
   }
+
+  print(paste0("xsgrid_new: ", xsgrid_new))
   
   return(list(xsgrid_new, xsgrid_all, xsgrid_id))
 }
@@ -405,9 +407,6 @@ obj_h <- function(output_file, gt_h_file,
 #' @return List with optimization results
 #' @export
 runAdaptiveTS <- function(exp_design,
-                          ref = -2,
-                          err_sig = 0.5,
-                          prop_sig = 0.3,
                           task_queue = NULL,
                           exp_id = NULL,
                           task_type = NULL,
@@ -423,6 +422,9 @@ runAdaptiveTS <- function(exp_design,
   nTS_samp <- exp_design$nTS_samp
   grid_npar <- exp_design$grid_npar
   p <- exp_design$p
+  prop_sig <- exp_design$prop_sig
+  err_sig <- exp_design$err_sig
+  ref <- exp_design$ref
   
   # Create initial design
   X_01 <- randomLHS(n = init_npar, k = p)
@@ -432,7 +434,7 @@ runAdaptiveTS <- function(exp_design,
   # Evaluate initial design
   print("Submitting Initial Design")
   y <- submit_emews(Xs_01, gt_h_file, task_queue, exp_id, task_type)
-  print("Finished Initiail Design Evaluation")
+  # print("Finished Initial Design Evaluation")
   
   # Standardize output
   y_std <- scale(log(y))
@@ -460,9 +462,10 @@ runAdaptiveTS <- function(exp_design,
   
   # TS starts here
   tt <- 2
-  print("Starting Iterative Evaluations")
+  cat("Starting Iterative Evaluations\n")
   while(no_of_sims < sim_budget){
     # for (tt in 1:nTS_iter){
+    print(f)
     out <- next_eval_CRN(model = f,
                          grid_npar = grid_npar,
                          nrep = nrep,
@@ -473,8 +476,10 @@ runAdaptiveTS <- function(exp_design,
                          adaptive = T)
     
     xnew <- out
-    print(paste0("Xnew: ", xnew))
+    cat("xnew: ", xnew, "\n")
+    flush.console()
     if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
+    print(paste0("xnew_m: ", xnew))
     
     ## evaluate new simulations 
     ynew <- submit_emews(xnew, gt_h_file, task_queue, exp_id, task_type)

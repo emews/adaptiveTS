@@ -466,6 +466,7 @@ runAdaptiveTS <- function(exp_design,
                          adaptive = T)
     
     xnew <- out
+    print(paste0("Xnew: ", xnew))
     if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
     
     ## evaluate new simulations 

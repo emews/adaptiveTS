@@ -117,7 +117,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
     }
   }
 
-  print(paste0("xsgrid_new: ", xsgrid_new))
+  # print(paste0("xsgrid_new: ", xsgrid_new))
   
   return(list(xsgrid_new, xsgrid_all, xsgrid_id))
 }
@@ -341,11 +341,11 @@ submit_emews <- function(design_points, gt_h_file, task_queue, exp_id, task_type
   eq_ids <- sapply(results$f_results, function(x) x$eq_task_id)
   eq_ids <- unlist(eq_ids)
   outfiles <- sapply(results$f_results[order(eq_ids)], function(x) x$data)
-  print(outfiles)
+  # print(outfiles)
   
   # Calculate loss/output values from result files
   y <- unlist(lapply(outfiles, obj_h, gt_h_file = gt_h_file))
-  print(y)
+  # print(y)
   
   return(y)
 }
@@ -466,6 +466,7 @@ runAdaptiveTS <- function(exp_design,
   while(no_of_sims < sim_budget){
     # for (tt in 1:nTS_iter){
     print(f)
+    cat("Num Sims: ", no_of_sims, "\n")
     out <- next_eval_CRN(model = f,
                          grid_npar = grid_npar,
                          nrep = nrep,
@@ -476,10 +477,10 @@ runAdaptiveTS <- function(exp_design,
                          adaptive = T)
     
     xnew <- out
-    cat("xnew: ", xnew, "\n")
+    # cat("xnew: ", xnew, "\n")
     flush.console()
     if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
-    print(paste0("xnew_m: ", xnew))
+    # print(paste0("xnew_m: ", xnew))
     
     ## evaluate new simulations 
     ynew <- submit_emews(xnew, gt_h_file, task_queue, exp_id, task_type)

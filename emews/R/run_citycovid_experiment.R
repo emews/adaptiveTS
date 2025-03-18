@@ -10,22 +10,23 @@ library(EQ.SQL)
 
 ## =================================
 ## BO experiment settings 
+source("exp_design.R")
 
 # init_npar = 30,    # Number of initial design points
 # nrep = 30,   
 
 # hard-coding these for now, can make input if necessary
-exp_design <- list(
-  sim_budget = 3000, # Total simulation budget
-  init_npar = 30,    # Number of initial design points
-  nrep = 30,         # Number of replications
-  grid_npar = 100,    # Number of candidate points for grid
-  nTS_samp = 200,    # Number of Thompson samples
-  p = 3,           # Dimension of the input space
-  err_sig = 0.5,
-  prop_sig = 0.3,
-  ref = -2
-)
+# exp_design <- list(
+#   sim_budget = 3000, # Total simulation budget
+#   init_npar = 30,    # Number of initial design points
+#   nrep = 30,         # Number of replications
+#   grid_npar = 100,    # Number of candidate points for grid
+#   nTS_samp = 200,    # Number of Thompson samples
+#   p = 3,           # Dimension of the input space
+#   err_sig = 0.5,
+#   prop_sig = 0.3,
+#   ref = -2
+# )
 
 ## =================================
 ## EMEWS setup
@@ -73,11 +74,11 @@ run <- function(exp_id, params) {
 
       exp_seed <- 1 # Is this correct to set here?
       gt_h_file <- params$gt_h_file
-      out <- runAdaptiveTS(exp_design, task_queue=task_queue, exp_id=exp_id, task_type=task_type, gt_h_file=gt_h_file,
-                          exp_seed = exp_seed, covtype = "Matern5_2")
+      out <- runAdaptiveTS(exp_design, task_queue=task_queue, exp_id=exp_id, task_type=task_type, exp_seed = exp_seed,
+                           gt_h_file=gt_h_file, gt_d_file=gt_d_file, covtype = "Matern5_2")
 
       # save output
-      saveRDS(out, file=paste0(params$results_directory, "/", exp_id, "_", "out.RData"))
+      saveRDS(list(out=out, exp_design=exp_design), file=paste0(params$results_directory, "/", exp_id, "_", "out.RData"))
   }, error = function(e) {
       print(e)
       print(paste0("python error: ", reticulate::py_last_error()))

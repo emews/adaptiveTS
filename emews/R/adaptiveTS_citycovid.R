@@ -321,7 +321,7 @@ generate_payload <- function(params,
 #'
 #' @return List containing outputs, simulation details, etc.
 #' @export
-submit_emews <- function(design_points, gt_h_file, task_queue, exp_id, task_type) {
+submit_emews <- function(design_points, task_queue, exp_id, task_type) {
   # Submit all tasks to EMEWS
   fts <- apply(design_points, 1, function(a) {
     payload <- generate_payload(a)
@@ -344,12 +344,15 @@ submit_emews <- function(design_points, gt_h_file, task_queue, exp_id, task_type
   # print(outfiles)
   
   # Calculate loss/output values from result files
-  y <- unlist(lapply(outfiles, obj_h, gt_h_file = gt_h_file))
+  #y <- unlist(lapply(outfiles, obj_h, gt_h_file = gt_h_file))
   # print(y)
   
-  return(y)
+  return(outfiles)
 }
 
+# -----------------------------------------------------------
+# EMEWS submission
+# -----------------------------------------------------------
 
 
 #' Objective on hospitalization
@@ -387,6 +390,103 @@ obj_h <- function(output_file, gt_h_file,
   return(sum((df_all$tot.hosp - df_all$total_hosp_sim)^2))
 }
 
+#' Objective on deaths
+#'
+#' @param output_file path to the CityCOVID count file
+#' @param gt_d_file path to the chicago ground truth deaths
+#' @param start_date beginning date of calibration period
+#' @param end_date end date of calibration period
+#'
+#' @return sum of squared difference between simulated and observed trajectory
+
+obj_d <- function(output_file, gt_d_file, 
+                  start_date = as.Date('2020-03-17'), 
+                  end_date = as.Date("2020-06-13")){
+  
+  ## process simulation
+  sim_df <- data.table::fread(output_file,
+                              select = c("tick", "dead_count"))
+  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  
+  ## process ground truth
+  gt_df <- data.table::fread(gt_d_file)
+  gt_df <- gt_df[(date >= start_date) & (date <= end_date)]
+  gt_df <- gt_df[!is.na(deaths)]
+  
+  ## merge
+  df_all <- merge(sim_df, gt_df, by = "date", all.y = TRUE)
+  
+  return(sum((df_all$dead_count - df_all$deaths)^2))
+  
+}
+
+
+
+#' Objective on hospitalizations and deaths
+#'
+#' @param output_file path to the CityCOVID count file
+#' @param gt_h_file path to the chicago ground truth hospitalization
+#' @param gt_d_file path to the chicago ground truth deaths
+#' @param start_date beginning date of calibration period
+#' @param end_date end date of calibration period
+#'
+#' @return sum of relative errors between simulated and observed trajectories
+
+obj_dh <- function(output_file, gt_h_file, gt_d_file, 
+                   start_date = as.Date('2020-03-17'), 
+                   end_date = as.Date("2020-06-13")){
+  
+  ## process simulation
+  sim_df <- data.table::fread(output_file,
+                              select = c("tick", "hosp_r_count", "hosp_icu_r_count",
+                                         "hosp_d_count", "hosp_icu_d_count",
+                                         "icu_r_count", "icu_d_count", "dead_count"))
+  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  sim_df[, total_hosp_sim := hosp_r_count + hosp_icu_r_count +
+           hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count]
+  
+  ## process ground truth
+  gt_d_df <- data.table::fread(gt_d_file)
+  gt_h_df <- data.table::fread(gt_h_file)
+  
+  gt_d_df <- gt_d_df[(date >= start_date) & (date <= end_date)]
+  gt_h_df <- gt_h_df[(date >= start_date) & (date <= end_date)]
+  
+  gt_d_df <- gt_d_df[!is.na(deaths)]
+  gt_h_df <- gt_h_df[!is.na(tot.hosp)]
+  
+  ## merge
+  df_all <- merge(sim_df, gt_h_df, by = "date", all.y = TRUE)
+  df_all <- merge(df_all, gt_d_df, by = "date", all.x = TRUE)
+  
+  df_all[, err:= abs(tot.hosp - total_hosp_sim)/tot.hosp + abs(deaths - dead_count)/deaths]
+  
+  return(sum(df_all$err))
+  
+}
+
+obj_citycovid <- function(output_files,
+                          objective,
+                          gt_h_file, 
+                          gt_d_file, 
+                          start_date = as.Date('2020-03-17'), 
+                          end_date = as.Date("2020-06-13")){
+  if (objective == 'hosp'){
+    y <- unlist(lapply(output_files, obj_h, gt_h_file = gt_h_file))
+  }
+  else if (objective == 'deaths'){
+    y <- unlist(lapply(output_files, obj_d, gt_d_file = gt_d_file))
+  }
+  else if (objective == 'both'){
+    y <- unlist(lapply(output_files, obj_dh, gt_h_file = gt_h_file, gt_d_file = gt_d_file))
+  } 
+  else {
+    print('objective must be one of c(hosp, death, both)')
+    y <- NULL
+  }
+  return(y)
+}
+
 # -----------------------------------------------------------
 # Main Optimization Functions
 # -----------------------------------------------------------
@@ -410,8 +510,9 @@ runAdaptiveTS <- function(exp_design,
                           task_queue = NULL,
                           exp_id = NULL,
                           task_type = NULL,
-                          gt_h_file = NULL,
                           exp_seed = NULL,
+                          gt_h_file = NULL,
+                          gt_d_file = NULL,
                           ...) {
   
   # Set seed if provided
@@ -425,6 +526,7 @@ runAdaptiveTS <- function(exp_design,
   prop_sig <- exp_design$prop_sig
   err_sig <- exp_design$err_sig
   ref <- exp_design$ref
+  obj <- exp_design$objective
   
   # Create initial design
   X_01 <- randomLHS(n = init_npar, k = p)
@@ -433,7 +535,8 @@ runAdaptiveTS <- function(exp_design,
   
   # Evaluate initial design
   print("Submitting Initial Design")
-  y <- submit_emews(Xs_01, gt_h_file, task_queue, exp_id, task_type)
+  outfiles <- submit_emews(Xs_01, task_queue, exp_id, task_type)
+  y <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
   # print("Finished Initial Design Evaluation")
   
   # Standardize output
@@ -483,7 +586,9 @@ runAdaptiveTS <- function(exp_design,
     # print(paste0("xnew_m: ", xnew))
     
     ## evaluate new simulations 
-    ynew <- submit_emews(xnew, gt_h_file, task_queue, exp_id, task_type)
+    outfiles <- submit_emews(xnew, task_queue, exp_id, task_type)
+    ynew <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
+
     X_list[[tt]] <- xnew
     y_list[[tt]] <- (log(ynew) - ycenter) / ysd
     ynative_list[[tt]] <- ynew

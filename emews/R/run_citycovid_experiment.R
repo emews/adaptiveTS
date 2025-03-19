@@ -8,10 +8,6 @@ library(argparse)
 library(reticulate)
 library(EQ.SQL)
 
-## =================================
-## BO experiment settings 
-source("exp_design.R")
-
 # init_npar = 30,    # Number of initial design points
 # nrep = 30,   
 
@@ -32,9 +28,9 @@ source("exp_design.R")
 ## EMEWS setup
 
 run <- function(exp_id, params) {
-  db_started <- FALSE
-  pool <- NULL
-  task_queue <- NULL
+    db_started <- FALSE
+    pool <- NULL
+    task_queue <- NULL
 
   tryCatch({
       eqsql <- init_eqsql(python_path = params$python_path)
@@ -59,7 +55,6 @@ run <- function(exp_id, params) {
       }
       pool_params <- eqsql$worker_pool$cfg_file_to_dict(params$pool_cfg_file)
       params$worker_pool_id <- 'adaptive_ts'
-      exp_id <- 1
       if (params$pool_type == "local") {
           pool <- eqsql$worker_pool$start_local_pool(params$worker_pool_id, params$pool_launch_script,
                                                      exp_id, pool_params)
@@ -74,6 +69,7 @@ run <- function(exp_id, params) {
 
       exp_seed <- 1 # Is this correct to set here?
       gt_h_file <- params$gt_h_file
+      gt_d_file <- params$gt_d_file
       out <- runAdaptiveTS(exp_design, task_queue=task_queue, exp_id=exp_id, task_type=task_type, exp_seed = exp_seed,
                            gt_h_file=gt_h_file, gt_d_file=gt_d_file, covtype = "Matern5_2")
 
@@ -110,6 +106,10 @@ if (params$db_port == -1) {
 }
 
 source(params$ts_r_file)
+## =================================
+## BO experiment settings 
+source(params$exp_design_file)
+
 
 if (!file.exists(params$results_directory)) {
     dir.create(params$results_directory)

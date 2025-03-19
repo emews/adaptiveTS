@@ -1,0 +1,1574 @@
+---
+title: "Example BO2"
+output: html_notebook
+---
+
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyverse)
+library(plotly)
+source("analysis_helpers.R")
+```
+
+```{r}
+experiment_tracker <- read.csv('experiment_tracker.csv')
+
+df1 <- combine_results(experiment_tracker$out_file[1], 
+                       experiment_tracker$experiment[1],
+                       experiment_tracker$summary_file[1])
+df2 <- combine_results(experiment_tracker$out_file[2], 
+                       experiment_tracker$experiment[2],
+                       experiment_tracker$summary_file[2])
+df3 <- combine_results(experiment_tracker$out_file[3], 
+                       experiment_tracker$experiment[3],
+                       experiment_tracker$summary_file[3])
+
+# combine
+df <- rbind(df1, df2, df3)
+
+ggplot(df) + 
+  geom_line(aes(x=budget,y=y_std,color=experiment,group=experiment))+
+  theme_minimal()
+```
+
+A bit more aggregated (by iteration, I guess)?
+```{r}
+ggplot(df %>% group_by(experiment, iter) %>% summarise(y_std_mean=mean(y_std))) + 
+  geom_line(aes(x=iter, y=y_std_mean, color=experiment, group=experiment)) +
+  theme_minimal()
+```
+```{r}
+best_traj
+```
+```{r}
+# update summary files to reflect new filepaths 
+df$instance_dir <- gsub('1.0-adaptive_ts_1742217498.163954', '3K_hospitalizations', df$instance_dir)
+df$instance_dir <- gsub('1.0-adaptive_ts_1742053883.049385', '2K_hospitalizations', df$instance_dir)
+
+# grab output files for best trajectories found with each experiment
+best_traj <- df %>%
+                group_by(experiment) %>%
+                select(experiment, y_std, instance_dir) %>%
+                slice_min(y_std) %>%
+                ungroup()
+                
+
+file_suffix <- '/output/counts_r1.csv'
+
+traj1 = prepare_trajectories(paste0(best_traj$instance_dir[1],file_suffix), melted=TRUE)
+traj1$experiment <- best_traj$experiment[1]
+traj2 = prepare_trajectories(paste0(best_traj$instance_dir[2],file_suffix), melted=TRUE)
+traj2$experiment <- best_traj$experiment[2]
+traj3 = prepare_trajectories(paste0(best_traj$instance_dir[3],file_suffix), melted=TRUE)
+traj3$experiment <- best_traj$experiment[3]
+```
+
+
+```{r}
+ggplot(traj1) + 
+  geom_line(aes(x=date, y=val, color=type, group=type)) +
+  facet_wrap(~metric) +
+  ggtitle(best_traj$experiment[1]) +
+  theme_minimal()
+
+ggplot(traj2) + 
+  geom_line(aes(x=date, y=val, color=type, group=type)) +
+  facet_wrap(~metric) +
+  ggtitle(best_traj$experiment[2]) +
+  theme_minimal()
+
+ggplot(traj3) + 
+  geom_line(aes(x=date, y=val, color=type, group=type)) +
+  facet_wrap(~metric) +
+  ggtitle(best_traj$experiment[3]) +
+  theme_minimal()
+```
+
+
+Initial design:
+```{r}
+plot_initial_design <- function(df){
+  
+}
+```
+
+```{r}
+fig01 <- plot_ly(out_df, x = ~seed, y = ~s2x, z = ~sah,
+               marker = list(color = ~y_std, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+fig02 <- plot_ly(out_df, x = ~seed, y = ~s2x, z = ~ba,
+               marker = list(color = ~y_std, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+fig03 <- plot_ly(out_df, x = ~seed, y = ~sah, z = ~ba,
+               marker = list(color = ~y_std, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+```
+
+
+```{r}
+fig1 <- plot_ly(out_df, x = ~seed, y = ~s2x, z = ~sah,
+               marker = list(color = ~iter, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+fig2 <- plot_ly(out_df, x = ~seed, y = ~s2x, z = ~ba,
+               marker = list(color = ~iter, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+fig3 <- plot_ly(out_df, x = ~seed, y = ~sah, z = ~ba,
+               marker = list(color = ~iter, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE)) %>% add_markers()
+```
+
+
+
+```{r}
+plot_ly(both3k_df %>% filter(iter==1, y_std<0), x = ~seed, y = ~s2x, z = ~sah, 
+               marker = list(color = ~y_std, colorscale = c('#FFE1A1', '#683531'), showscale = TRUE))
+```
+
+
+
+```{r}
+# order by instance
+both3k_summary <- both3k_summary[order(both3k_summary$instance),]
+
+bounds = list(c(.01, .15), c(0.1, 1), c(0.01, 0.5))
+            
+unscale_params <- function(x, bounds){
+  return((x - bounds[1]) / (bounds[2] - bounds[1]))
+}
+
+
+both3k_summary$s2xs <- unscale_params(both3k_summary$susceptible.to.exposed.probability, bounds[[1]])
+both3k_summary$sahs <- unscale_params(both3k_summary$stay.at.home.probability, bounds[[2]])
+both3k_summary$bas <- unscale_params(both3k_summary$stoe.behavioral.adjustment.probability, bounds[[3]])
+```
+
+```{r}
+# can we just cbind these instead of merging?
+
+both3k_dff <- cbind(both3k_df, both3k_summary)
+```
+
+```{r}
+# make sure parameters are correct
+tol <- 1e-3
+
+mean((both3k_dff$s2x - both3k_dff$s2xs) < tol)
+mean((both3k_dff$sah - both3k_dff$sahs) < tol)
+mean((both3k_dff$ba - both3k_dff$bas) < tol)
+mean((both3k_dff$seed - both3k_dff$seed) < tol)
+
+# ok great we're good
+```
+
+
+```{r}
+# get output files, ordered by objective (smallest to largest)
+output_files <- both3k_dff[order(both3k_dff$y), 'instance_dir']
+
+# look at best overall
+output_file <- paste0(output_files[[1]], '/output/counts_r1.csv')
+```
+
+
+```{r}
+source("analysis_helpers.R")
+df_melted = prepare_trajectories(output_file, melted=TRUE)
+```
+
+
+```{r}
+ggplot(df_melted) + 
+  geom_line(aes(x=date, y=val, color=type, group=type)) +
+  facet_wrap(~metric) +
+  theme_minimal()
+```
+
+
+```{r}
+  sim_df <- data.table::fread(output_file,
+                              select = c("tick", "hosp_r_count", "hosp_icu_r_count",
+                                         "hosp_d_count", "hosp_icu_d_count",
+                                         "icu_r_count", "icu_d_count", "dead_count"))
+  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  sim_df[, total_hosp_sim := hosp_r_count + hosp_icu_r_count +
+           hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count]
+  
+  ## process ground truth
+  gt_d_df <- data.table::fread(gt_d_file)
+  gt_h_df <- data.table::fread(gt_h_file)
+  
+  gt_d_df <- gt_d_df[(date >= start_date) & (date <= end_date)]
+  gt_h_df <- gt_h_df[(date >= start_date) & (date <= end_date)]
+  
+  gt_d_df <- gt_d_df[!is.na(deaths)]
+  gt_h_df <- gt_h_df[!is.na(tot.hosp)]
+  
+  ## merge
+  df_all <- merge(sim_df, gt_h_df, by = "date", all.y = TRUE)
+  df_all <- merge(df_all, gt_d_df, by = "date", all.x = TRUE)
+  
+  df_all[, err:= abs(tot.hosp - total_hosp_sim)/tot.hosp + abs(deaths - dead_count)/deaths]
+  
+  # melt for plots
+  df_melted <- melt(
+    df_all, 
+    id.vars = c("date", "tick"), 
+    measure.vars = c("total_hosp_sim", "tot.hosp", "dead_count", "deaths"),
+    variable.name = "type_metric",
+    value.name = "val"
+  )
+  
+  # Create 'metric' and 'type' based on column names
+  df_melted[, metric := fifelse(type_metric %in% c("tot.hosp", "total_hosp_sim"), "hosp", "deaths")]
+  df_melted[, type := fifelse(type_metric %in% c("tot.hosp", "deaths"), "ground_truth", "simulation")]
+  
+  # Remove the original column name (type_metric) since it's encoded in `metric` and `type`
+  df_melted[, type_metric := NULL]
+```
+
+```{r}
+# round for merging 
+both3k_summary[,c('s2x', 'sah', 'ba')] <- round(both3k_summary[,c('s2x', 'sah', 'ba')], 3)
+both3k_df[,c('s2x', 'sah', 'ba')] <- round(both3k_df[,c('s2x', 'sah', 'ba')], 3)
+
+
+both3k_instances <- merge(both3k_df, both3k_summary, by=c('s2x', 'sah', 'ba', 'seed'), all.x = TRUE)
+
+both3k_instances <- both3k_instances[order(both3k_instances$budget),]
+
+# check where merge didn't work
+both3k_instances %>% filter(is.na(instance_dir))
+```
+
+
+```{r}
+both3k_instances
+```
+
+```{r}
+round(both3k_df[,c('s2x', 'sah', 'ba')],3)
+```
+
+
+
+```{r}
+exp_path <- "/lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/experiments/3K_100gn_200nts_hosp_deaths_1.0-adaptive_ts_1742319512.630925/instances/"
+instances <- as.numeric(
+  gsub("instance_", "", list.dirs(exp_path, full.names = FALSE, recursive = FALSE))
+)
+  
+extract_value <- function(lines, key) {
+  match <- grep(paste0("^", key, "\\s*=\\s*"), lines, value = TRUE)
+  if (length(match) == 0) return(NA)
+  value <- sub(paste0("^", key, "\\s*=\\s*"), "", match)
+  return(as.numeric(trimws(value)))
+}
+
+read_instance_params <- function(instance, exp_path){
+  lines <- readLines(paste0(exp_path, 'instance_', instance, '/parameters_r1.txt'))
+  params <- list(
+    instance=instance,
+    susceptible.to.exposed.probability = extract_value(lines, "susceptible.to.exposed.probability"),
+    stay.at.home.probability = extract_value(lines, "stay.at.home.probability"),
+    stoe.behavioral.adjustment.probability = extract_value(lines, "stoe.behavioral.adjustment.probability"),
+    seed = extract_value(lines, "global.random.seed")
+  )
+  return(params)
+}
+
+#instance_params <- do.call(rbind, lapply(instances[3000:3014], read_instance_params, exp_path=exp_path))
+
+for(i in seq_along(instances)){
+  inst <- instances[[i]]
+  read_instance_params(inst, exp_path)
+}
+```
+
+
+```{r}
+# Function to extract a value by matching key
+
+
+# Extract values
+susceptible_to_exposed_probability <- extract_value(lines, "susceptible.to.exposed.probability")
+stay_at_home_probability <- extract_value(lines, "stay.at.home.probability")
+stoe_behavioral_adjustment_probability <- extract_value(lines, "stoe.behavioral.adjustment.probability")
+global_random_seed <- extract_value(lines, "global.random.seed")
+```
+
+### Setup
+```{r}
+# Read experiment config
+#exp_path  <- "/lcrc/project/EMEWS/improv/abby/adaptiveTS/emews/experiments/big_experiment/results"
+config <- fread("../emews/data/upfs/config.csv")
+config[, (ncol(config)) := NULL]
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+
+# Get true trajectory 
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue_sim <- run_sim(c(xtrue, strue))
+ytrue <-  ytrue_sim$n_SI
+
+ggplot(ytrue_sim) + 
+  geom_line(aes(x=step, y=n_SI))+
+  theme_minimal()
+```
+
+
+Run experiment 652 because it got killed on improv:
+```{r}
+library(pryr)
+source('../script/R/adaptive_TS_seed.R')
+
+ii <- 652
+exp_path <- config$exp_path[ii]
+exp_seed <- config$exp_seed[ii]
+init_npar <- config$init_npar[ii]
+nrep <- config$nrep[ii]
+sim_budget <- config$sim_budget[ii]
+grid_npar <- config$grid_npar[ii]
+nTS_samp <- config$nTS_samp[ii]
+p <- 2
+ref <- -2
+
+gc()  # Run garbage collection before measuring
+mem_before <- mem_used()
+
+out_adaptive_CRNGP_seed <- TSBatchBO_CRNGP_seed(init_npar, nrep, p, 
+                                                sim_budget = sim_budget, 
+                                                grid_npar = grid_npar, 
+                                                nTS_samp = nTS_samp, 
+                                                ytrue = ytrue_full, 
+                                                sim_func = run_sim_err, 
+                                                exp_seed = exp_seed, 
+                                                covtype = "Matern5_2")
+
+mem_after <- mem_used()
+
+# Memory difference
+mem_used_mb <- (mem_after - mem_before) / (1024^2)  # Convert bytes to MB
+cat("Memory used by function: ", mem_used_mb, "MB\n")
+```
+
+```{r}
+  X_01 <- lhs::randomLHS(n = init_npar, k = p)
+  s <- 1:nrep
+  Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
+  
+  y <- rep(NA, init_npar*nrep)
+  for (ii in 1:(init_npar*nrep)){
+    y[ii] <- run_sim_err(Xs_01[ii, ])$out
+  }
+```
+
+### 1. "How quickly do we find N trajectories under threshold T"
+- Need to identify reasonable thresholds
+- What does "how quickly" mean in this context
+
+```{r, fig.width=5}
+out_list <- load_outputs(100, exp_path, config)
+plot_thresholds(out_list, yobs)
+plot_threshold_search(out_list, par_true)
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+true_param <- data.frame(
+  rep = par_true[3],  # x-coordinate
+  p1 = par_true[1],  # y-coordinate
+  p2 = par_true[2],  # z-coordinate
+  iter = 1,
+  method = "true"  # Custom label (if needed)
+)
+
+# Base 3D scatter plot
+fig <- plot_ly(dfx, 
+               x = ~rep, y = ~p1, z = ~p2, color = ~method, type = "scatter3d", mode = "markers") %>%
+  add_trace(data = true_param, 
+            x = ~rep, y = ~p1, z = ~p2, 
+            type = "scatter3d", mode = "markers",
+            marker = list(size = 10, color = "black", symbol = "square"),
+            name = "true") %>%  # Custom legend label for the point
+  layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+  ))
+
+fig
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+true_param <- data.frame(
+  rep = par_true[3],  # x-coordinate
+  p1 = par_true[1],  # y-coordinate
+  p2 = par_true[2],  # z-coordinate
+  iter = 1,
+  rmse=1,
+  method = "true"  # Custom label (if needed)
+)
+
+# Base 3D scatter plot
+fig <- plot_ly(dfx, 
+               x = ~rep, y = ~p1, z = ~p2, color = ~rmse, type = "scatter3d", mode = "markers") %>%
+  add_trace(data = true_param, 
+            x = ~rep, y = ~p1, z = ~p2, 
+            type = "scatter3d", mode = "markers",
+            marker = list(size = 10, color = "black", symbol = "square"),
+            name = "true") %>%  # Custom legend label for the point
+  layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+  ))
+
+fig
+```
+
+
+```{r}
+ggplot(dfx %>% filter(iter>1) %>% group_by(method, iter) %>% count()) + 
+  geom_line(aes(x=iter, y=n, color=method, group=method))+
+  theme_minimal()
+```
+
+```{r}
+dfx <- search_space(out_list)
+
+plot_ly(dfx, x = ~rep, y = ~p1, z = ~p2, color = ~method)
+plot_ly(dfx %>% filter(method %in% c('adaptive_crn', 'fixed_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('adaptive_het', 'fixed_het')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('adaptive_het', 'adaptive_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+plot_ly(dfx %>% filter(method %in% c('fixed_het', 'fixed_crn')), x = ~rep, y = ~p1, z = ~p2, color = ~method)%>%   layout(legend = list(
+    x = 0.8, y = 0.5, xanchor = "left", yanchor = "middle"
+))
+```
+
+
+```{r message=FALSE, warning=FALSE}
+exp_list <- 1:990
+thresholds <- c(15, 20, 25, 30)
+n4checkpoint <- c(10, 25, 50)
+
+analysis_list <- lapply(exp_list, function(x) {
+    analyze_experiment(x, exp_path=exp_path, config=config, thresholds=thresholds, n_trajectories=n4checkpoint)
+})
+
+# Assuming each `analyze_experiment` returns a list of 3 data frames,
+# separate them by extracting each corresponding index
+threshold_cnt <- do.call(rbind, lapply(analysis_list, `[[`, 1))
+checkpoint_reached <- do.call(rbind, lapply(analysis_list, `[[`, 2))
+threshold_budget_auc <- do.call(rbind, lapply(analysis_list, `[[`, 3))
+threshold_budget_path <- do.call(rbind, lapply(analysis_list, `[[`, 4))
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+ggplot(threshold_cnt, aes(x=factor(threshold), y=num_trajectories, fill=method)) + 
+  #geom_bar(stat="summary", position="dodge") + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  geom_boxplot() +
+  facet_wrap(~sim_budget, ncol=1, 
+             labeller = labeller(sim_budget = function(x) paste('budget=', x)), scales = "free_y")+
+  xlab('Threshold (RMSE)') +
+  ylab('Number trajectories found') +
+  theme_minimal()
+
+threshold_cnt$pct_traj <- threshold_cnt$num_trajectories/threshold_cnt$sim_budget
+
+ggplot(threshold_cnt, aes(x=factor(threshold), y=pct_traj, fill=method)) + 
+  #geom_bar(stat="summary", position="dodge") + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  geom_boxplot() +
+  xlab('Threshold (RMSE)') +
+  ylab('Prop. of budget under threshold') +
+  facet_wrap(~sim_budget, ncol=1, labeller = labeller(sim_budget = function(x) paste('budget=', x)))+
+  theme_minimal()
+```
+
+
+Split by budget:
+```{r}
+threshold_cnt$method <- as.factor(threshold_cnt$method)
+
+b200 <-  threshold_cnt %>% filter(sim_budget==200)
+b500 <- threshold_cnt %>% filter(sim_budget==500)
+b700 <- threshold_cnt %>% filter(sim_budget==700)
+```
+
+
+```{r}
+b200 %>% 
+  filter(threshold==30) %>%
+  plot_ly() %>% 
+  add_trace(x = ~as.numeric(method), y = ~pct_traj, type = "box", 
+            hoverinfo = 'name+y',
+            line = list(color = "black"),   # Black outline for the boxplot
+            fillcolor = "rgba(0,0,0,0)",    # Transparent fill (no fill)
+            boxpoints=FALSE) %>% 
+  add_markers(x = ~jitter(as.numeric(method)), y = ~pct_traj, color = ~factor(nrep),
+              marker = list(size = 6),
+              hoverinfo = "text",
+              text = ~paste0("method: ",method,
+                             "<br>pct<t: ",round(pct_traj, 3),
+                             "<br>exp_seed: ", exp_seed,
+                             "<br>init_npar: ", init_npar,
+                             "<br>nrep: ", nrep,
+                             "<br>grid_npar: ", grid_npar,
+                             "<br>nTS_samp: ", nTS_samp
+                             ),
+              showlegend = FALSE) %>% 
+  layout(legend = list(orientation = "h",
+                       x =0.5, xanchor = "center",
+                       y = 1, yanchor = "bottom"
+                       ),
+        xaxis = list(title = "Method",
+                      tickmode = "array",
+                      tickvals = as.numeric(unique(b700$method)),  # Numeric x-values
+                      ticktext = unique(b700$method),  # Corresponding categorical labels
+                      showticklabels = TRUE))
+
+```
+
+
+```{r}
+ggplot(threshold_cnt, aes(x=exp_seed,y=pct_traj, colour=method)) +
+  stat_smooth(method="loess", se=TRUE, aes(fill=method), alpha=0.3) +
+  facet_grid(sim_budget~threshold) +
+  theme_bw()
+
+ggplot(threshold_cnt, aes(x=factor(nrep),y=pct_traj, colour=method)) +
+  geom_boxplot() +
+  facet_grid(sim_budget~threshold) +
+  theme_bw()
+```
+
+```{r, fig.width=5}
+# Ensure pct_cat is a factor for coloring
+t = 25
+threshold_cnt %>%
+  filter(threshold == t) %>%
+  pivot_longer(cols = c(init_npar, nrep, grid_npar, nTS_samp), names_to = "parameter", values_to = "val") %>%
+  ggplot(aes(x = factor(val), y = pct_traj, fill = method)) +
+  geom_boxplot(outlier.shape = NA, color = "black") +  # Black outline, no default outliers
+  ylab('Prop. of budget under threshold') +
+  xlab('Parameter value') +
+  facet_grid(sim_budget~parameter, scales='free_x')  +
+  ggtitle(paste('Threshold =', t)) +
+  theme_minimal()
+  # Facet by variable
+  #labs(x = "Parameter Values", y = "pct_traj", title = "Boxplots of pct_traj by Parameters") +
+  #theme_minimal() +
+  #theme(legend.position = "right")
+
+```
+
+
+Dig into this more, e.g., the budget 200 with 60% good what was up, 
+
+```{r}
+checkpoint_reached
+```
+
+
+```{r message=FALSE, warning=FALSE}
+checkpoint_reached$proportion_checkpointed = ifelse(checkpoint_reached$checkpoint==-1, 0, 1)
+
+ggplot(checkpoint_reached, aes(x=threshold, y=proportion_checkpointed, fill=method)) + 
+  geom_bar(stat='summary', position="dodge") + 
+  facet_wrap(~n_trajectories + sim_budget, labeller = labeller(n_trajectories = function(x) paste(x, 'trajectories'), sim_budget = function(x) paste('budget=', x))) +
+  theme_minimal()
+```
+
+```{r}
+checkpoint_reached$method = factor(checkpoint_reached$method)
+
+checkpoint_reached %>% 
+  filter(sim_budget==700, threshold==15) %>%
+  plot_ly() %>% 
+  add_trace(x = ~as.numeric(method), y = ~checkpoint, type = "box", 
+              hoverinfo = 'name+y',
+              line = list(color = "black"),   # Black outline for the boxplot
+              fillcolor = "rgba(0,0,0,0)",    # Transparent fill (no fill)
+              boxpoints=FALSE) %>% 
+    add_markers(x = ~jitter(as.numeric(method)), y = ~checkpoint, color = ~nrep,
+                marker = list(size = 6),
+                hoverinfo = "text",
+                text = ~paste0("method: ",method,
+                               "<br>pct<t: ",round(checkpoint, 3),
+                               "<br>exp_seed: ", exp_seed,
+                               "<br>init_npar: ", init_npar,
+                               "<br>nrep: ", nrep,
+                               "<br>grid_npar: ", grid_npar,
+                               "<br>nTS_samp: ", nTS_samp
+                               ),
+                showlegend = FALSE) %>% 
+    layout(legend = list(orientation = "h",
+                         x =0.5, xanchor = "center",
+                         y = 1, yanchor = "bottom"
+                         ),
+          xaxis = list(title = "Method",
+                        tickmode = "array",
+                        tickvals = as.numeric(unique(b700$method)),  # Numeric x-values
+                        ticktext = unique(b700$method),  # Corresponding categorical labels
+                        showticklabels = TRUE))
+```
+
+```{r, fig.width=5}
+ggplot(checkpoint_reached %>% filter(threshold==20, n_trajectories==50))+
+  geom_density(aes(x=checkpoint, fill=factor(nrep)), alpha=.4) +
+  facet_grid(sim_budget~method, scales="free_y")
+    
+```
+
+
+```{r}
+ggplot(threshold_budget_path %>% filter(exp_id==100), aes(x=time, y=trajectories_found, color=method, group=method)) + 
+  #stat_smooth(method="loess", se=TRUE, aes(fill=method), alpha=0.3)  + 
+  geom_line() +
+  facet_wrap(~threshold, ncol=4) + 
+  theme_minimal()
+
+```
+
+Why is purple higher than green? Why is blue so low?
+```{r message=FALSE, warning=FALSE, fig.width=5, fig.height=2}
+ggplot(threshold_budget_auc, aes(x=threshold, y=auc, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") + 
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~sim_budget, labeller = labeller(sim_budget = function(x) paste('budget=', x)), scale='free_y')+
+  theme_minimal()
+```
+
+
+```{r}
+threshold_budget %>%
+    group_by(method, threshold) %>%
+    summarise(
+        n =n(), 
+        mean_auc = mean(auc),
+        std = sd(auc),
+        lower_ci = mean_auc - qt(0.975, df=n()-1) * sd(auc) / sqrt(n()),
+        upper_ci = mean_auc + qt(0.975, df=n()-1) * sd(auc) / sqrt(n())
+    )
+
+```
+```{r}
+pm <- ggpairs(
+  idk[,3:ncol(idk)],
+  mapping = ggplot2::aes(color = cut),
+  upper = list(continuous = wrap("density", alpha = 0.5), combo = "box_no_facet"),
+  lower = list(continuous = wrap("points", alpha = 0.3), combo = wrap("dot_no_facet", alpha = 0.4)),
+  title = "Diamonds"
+)
+```
+
+
+```{r}
+# Convert to long format for ggplot
+df_long <- reshape2::melt(idk[,3:ncol(idk)], id.vars = "auc")
+
+ggplot(df_long, aes(value, auc)) +
+  geom_point(aes(color = auc)) +
+  facet_wrap(~ variable, scales = "free") +
+  scale_color_viridis_c()
+```
+
+```{r message=FALSE, warning=FALSE}
+idk = threshold_budget %>% filter(method=='adaptive_crn', threshold==15)
+idk = idk %>%
+    mutate(auc_category = cut(auc, 
+                              breaks = quantile(auc, probs = seq(0, 1, 0.2), na.rm = TRUE),
+                              labels = c("Very Low", "Low", "Medium", "High", "Very High"),
+                              include.lowest = TRUE))
+
+ggpairs(idk, columns=5:10, mapping = aes(color = auc_category)) + 
+  scale_color_manual(values = c("blue", rep("purple", 4), "red")) 
+```
+
+
+```{r}
+ggplot(threshold_budget, aes(x=threshold, y=auc, fill=method)) + 
+  geom_bar(stat="summary", fun="mean", position="dodge") + 
+  geom_errorbar(stat="summary", fun.data=mean_sdl, fun.args=list(mult=1), position="dodge")
+
+```
+
+
+
+  
+
+  
+```{r}
+dff = dfx %>% filter(iter > 1, method %in% c('fixed_crn', 'fixed_het')) %>% group_by(method, p1, p2) %>% count(sort=TRUE) %>% mutate(logn=log(n))
+
+ggplot(dff)+ 
+  geom_point(aes(x = p1, y = p2, color=n), size=5) +
+  geom_point(data=data.frame(p1=par_true[1], p2=par_true[2], rep=par_true[3]), aes(x=p1, y=p2), color='red', fill='red', size=3, shape=23) +
+  facet_wrap(~method) +
+  theme_minimal() 
+  
+```
+  
+```{r}
+ggplot(dfx, aes(x = p1, y = p2, color=rmse)) +
+  geom_density_2d_filled(alpha = 0.5) +
+  facet_wrap(~method) +
+  theme_minimal() 
+```
+
+
+
+
+
+```{r}
+
+
+ggplot(dfx, aes(x = p1, y = p2, color=rmse)) +
+  geom_point(size=3, alpha=.5) + 
+ #scale_color_gradient(low = "gold", high = "cornflowerblue") +
+  theme_minimal() 
+  #geom_density_2d_filled(alpha = 0.5)
+```
+
+
+
+```{r}
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+
+```
+
+
+```{r}
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- 0
+  for (i in 1:n) {
+    fitness <- fitness + sqrt(sum(simout[,i] - yobs)^2)
+  }
+  fitness <- fitness/n
+  
+  #mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+```
+
+
+```{r}
+energy_score <- function(simout, yobs) {
+  n <- ncol(simout)
+  m <- nrow(simout)
+  
+  # Compute the first term: Average distance from surveillance data
+  fitness <- 0
+  for (i in 1:n) {
+    fitness <- fitness + sqrt(sum(simout[,i] - yobs)^2)
+  }
+  fitness <- fitness/n
+  
+  #mean(sqrt(colSums((simout - matrix(yobs, nrow = m, ncol = n))^2)))
+  
+  # Compute the second term: Average pairwise distance between trajectories
+  pairwise_distances <- function(a, b) {
+    sqrt(sum((a - b)^2))
+  }
+  
+  pairwise <- 0
+  for (i in 1:n) {
+    for (j in 1:n) {
+      pairwise <- pairwise + sqrt(sum(simout[,i] - simout[,j])^2)
+    }
+  }
+  pairwise <- pairwise/(2*n^2)
+  return(fitness-pairwise)
+}
+```
+
+
+# Example usage:
+set.seed(42)
+N <- 100  # Number of samples
+M <- 10   # Number of time steps
+
+# Simulate some trajectory samples (N x M matrix)
+x_samples <- matrix(rnorm(N * M, mean = 0, sd = 1), nrow = N, ncol = M)
+
+# Simulated observed trajectory
+y_observed <- rnorm(M, mean = 0, sd = 1)
+
+# Compute Energy Score
+ES_value <- energy_score(x_samples, y_observed)
+print(ES_value)
+```
+
+
+```{r}
+threshold_budget(out_list, show_plots=TRUE)
+```
+
+
+```{r}
+nbests <- c(10, 25, 50, 75, 100)
+
+combine_nbests <- function(out_list, nbests) {
+  all_results <- list()
+  for (i in seq_along(nbests)) {
+    result <- lapply(out_list, function(out) nbest_mean(nbest = nbests[[i]], out = out))
+    result$nbest <- nbests[[i]]
+    all_results[[i]] <- result
+  }
+  
+  
+  combined_df <- do.call(rbind, lapply(all_results, function(x) {
+    df <- as.data.frame(x)
+    return(df)
+  }))
+  
+  return(combined_df)
+}
+
+
+analyze_exp <- function(exp_id, exp_path, nbest_list=c(10, 25, 50, 75, 100)){
+  out_list <- load_outputs(exp_id, exp_path)
+  df <- combine_nbests(out_list, nbest_list)
+  df$exp_id <- exp_id
+  return(df)
+}
+```
+
+
+```{r message=FALSE, warning=FALSE}
+exp_list <- 1:990
+
+result_df <- do.call(rbind, lapply(exp_list, function(x) {
+    df <- analyze_exp(x, exp_path=exp_path)
+    return(df)
+  }))
+```
+
+
+
+
+
+```{r}
+out_list <- load_outputs(1, exp_path)
+nbest_pct(25, out_list$adaptive_crn$y_rmse, 25)
+
+plot(1:20, nbest_pct(25, out_list$adaptive_crn$y_rmse, 25)$)
+```
+
+
+```{r}
+plot_nbest_traj(100, out_list$fixed_crn, out_list$adaptive_crn, ytrue)
+```
+
+
+```{r}
+result_df['best_method'] = apply(result_df[, 1:4], 1, which.min)
+result_df$best_method <- colnames(result_df)[result_df$best_method]
+table(result_df$best_method,result_df$nbest)
+```
+
+
+
+```{r}
+melted_df <- result_df %>%
+  pivot_longer(
+    cols = c("fixed_crn", "adaptive_crn", "fixed_het",  "adaptive_het"),
+    names_to = "method",
+    values_to = "rmse"
+  )
+```
+
+Merge in configs:
+```{r}
+exp_config <- read.csv("/lcrc/project/EMEWS/improv/abby/adaptiveTS/emews/data/upfs/config.csv")
+exp_config <- exp_config[, -ncol(exp_config)]
+exp_config$exp_id <- as.numeric(gsub("exp_", "", exp_config$exp_id))
+
+df <- merge(melted_df, exp_config)
+
+df
+```
+
+
+
+```{r}
+ggplot(melted_df, aes(x=factor(nbest), y=rmse, fill=method)) + 
+  geom_boxplot(position = position_dodge(width = 0.8))+
+  theme_bw()
+
+ggplot(melted_df, aes(x=factor(nbest), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  theme_minimal()
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+ggplot(df, aes(x=factor(sim_budget), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest), ncol=5) +
+  theme_minimal()
+
+ggplot(df, aes(x=factor(init_npar), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest), ncol=5) +
+  theme_minimal()
+```
+
+```{r message=FALSE, warning=FALSE}
+ggplot(df, aes(x=sim_budget, y=rmse, fill=method, color=method)) + 
+  geom_point(stat="summary", position="dodge") +
+  geom_line(aes(x=sim_budget, y=rmse, color=method)) + 
+  #geom_errorbar(stat='summary', position="dodge") +
+  facet_wrap(~factor(nbest)) +
+  theme_minimal()
+```
+
+
+
+```{r}
+ggplot(df, aes(x=factor(exp_seed), y=rmse, fill=method)) + 
+  geom_bar(stat="summary", position="dodge") +
+  geom_errorbar(stat='summary', position="dodge") +
+  theme_bw()
+```
+
+
+
+```{r}
+ggplot(df, aes(x = factor(init_npar), y = rmse, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+```
+
+
+```{r}
+df %>% filter(nbest==25, sim_budget==200) %>%
+  group_by(method, init_npar) %>%
+  summarize(rmse = mean(rmse))
+
+```
+
+
+Just do the AUC for the two  metrics:
+```{r}
+nbest_pct(100, out$fixed_het$y_rmse, 100)
+```
+
+
+```{r}
+
+auc_trapezoids<- function(y){
+  x <- seq_along(y)
+  # want zero to be reference
+  auc <- sum((y[-1] + y[-length(y)]) * diff(x) / 2)
+  return(auc)
+}
+
+
+
+exp_id <- 5
+
+outfile <- sprintf("%s/exp_%s_out.RData", exp_path, exp_id)
+
+temp_env <- new.env()
+load(outfile, envir = temp_env)
+out_fixed_CRNGP <- temp_env$out_fixed_CRNGP
+out_adaptive_CRNGP <- temp_env$out_adaptive_CRNGP
+out_fixed_hetGP <- temp_env$out_fixed_hetGP
+out_adaptive_hetGP <- temp_env$out_adaptive_hetGP
+
+res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
+res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
+res_fixed_hetGP <- collect_results(out_fixed_hetGP)
+res_adaptive_hetGP <- collect_results(out_adaptive_hetGP)
+
+  y_fixed_crn <- res_fixed_CRNGP$y_native
+  y_adapt_crn <-  res_adaptive_CRNGP$y_native
+  y_fixed_het <-  res_fixed_hetGP$y_native
+  y_adapt_het <-  res_adaptive_hetGP$y_native
+  
+  
+  # negative makes auc weird
+
+  
+  #y_fixed_crn <- y_fixed_crn - ymin
+  #y_adapt_crn <- y_adapt_crn - ymin
+  #y_fixed_het <- y_fixed_het - ymin
+  #y_adapt_het <- y_adapt_het - ymin
+  
+  res_fixed_crn <- best_so_far(y_fixed_crn, m=nbest, n=n)
+  res_adaptive_crn <- best_so_far(y_adapt_crn, m=nbest, n=n)
+  res_fixed_het <- best_so_far(y_fixed_het, m=nbest, n=n)
+  res_adaptive_het <- best_so_far(y_adapt_het, m=nbest, n=n)
+  
+   ymin <- min(res_fixed_crn, res_adaptive_crn, res_fixed_het, res_adaptive_het)
+  ymax <- max(res_fixed_crn, res_adaptive_crn, res_fixed_het, res_adaptive_het)
+  
+  labs = c("CRN-adaptive", "CRN-fixed", "Het-adaptive", "Het-fixed")
+  xax_fixed_crn = (1:length(res_fixed_crn)) + n
+  xax_adapt_crn = (1:length(res_adaptive_crn)) + n
+  xax_fixed_het = (1:length(res_fixed_het)) + n
+  xax_adapt_het = (1:length(res_adaptive_het)) + n
+  
+  plot(xax_adapt_crn, res_adaptive_crn, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("Experiment", exp_id))
+  points(xax_fixed_crn, res_fixed_crn, pch = 19, col = alpha("#00BA38", 1), type = "l")
+  points(xax_adapt_het, res_adaptive_het, pch = 19, col = alpha("#4287f5", 1), type = "l")
+  points(xax_fixed_het, res_fixed_het, pch = 19, col = alpha("#f5c842", 1), type = "l")
+  legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38", "#4287f5", "#f5c842"))
+
+  
+  auc_fixed_crn <- auc_trapezoids(res_fixed_crn)
+  auc_adapt_crn <- auc_trapezoids(res_adaptive_crn)
+  auc_fixed_het <- auc_trapezoids(res_fixed_het)
+  auc_adapt_het <- auc_trapezoids(res_adaptive_het)
+  
+  auc_out <- list(auc_fixed_crn=auc_fixed_crn,
+               auc_adapt_crn=auc_adapt_crn,
+               auc_fixed_het=auc_fixed_het,
+               auc_adapt_het=auc_adapt_het,
+               #auc_delta=(auc_adapt-auc_fixed)/auc_fixed,
+               auc_fixed_crn_pct = auc_fixed_crn/((ymax-ymin) * length(res_fixed_crn)),
+               auc_adaptive_crn_pct = auc_adapt_crn/((ymax-ymin) * length(res_adaptive_crn)),
+               auc_fixed_het_pct = auc_fixed_het/((ymax-ymin) * length(res_fixed_het)),
+               auc_adaptive_het_pct = auc_adapt_het/((ymax-ymin) * length(res_adaptive_het)))
+```
+
+
+```{r}
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, 
+                        res_fixed_CRNGP$x_mat, 
+                        res_adaptive_CRNGP$x_mat, 
+                        res_fixed_CRNGP$y_vec, 
+                        res_adaptive_CRNGP$y_vec, 
+                        yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+```
+
+
+```{r, fig.width=14, fig.height=7}
+nbests <- seq(20, sim_budget, length.out = 6)
+par(mfrow = c(2, 3))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+}
+```
+
+
+```{r}
+## Create ground truth
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+
+
+# user input
+exp_path <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/exp_1/"
+exp_seed <- 23
+init_npar <- 5
+nrep <- 10
+sim_budget <- 200
+grid_npar <- 100
+nTS_samp <- 30
+
+# optional input
+err_sig <- 0.5
+prop_sig <- 0.3
+
+# fixed input for these experiments
+sim_func <- run_sim_err
+p <- 2
+ref <- -2
+```
+
+
+```{r}
+out_fixed_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                   grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                   ytrue = ytrue_full, ref = ref,
+                                   err_sig = err_sig, prop_sig = prop_sig, 
+                                   sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                   adaptive = F)
+
+out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                      grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                      ytrue = ytrue_full, ref = ref,
+                                      err_sig = err_sig, prop_sig = prop_sig, 
+                                      sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                      adaptive = T)
+
+out_fixed_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                   grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                   ytrue = ytrue_full, ref = ref,
+                                   err_sig = err_sig, prop_sig = prop_sig, 
+                                   sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                   adaptive = F)
+
+out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                      grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                      ytrue = ytrue_full, ref = ref,
+                                      err_sig = err_sig, prop_sig = prop_sig, 
+                                      sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                      adaptive = T)
+
+```
+
+
+```{r}
+## collect and format results
+collect_results <- function(out_list){
+  x_mat <- do.call(rbind, out_list$X_list)
+  y_vec <- unlist(out_list$y_list)
+  y_native <- unlist(out_list$ynative_list)
+  
+  simout_flat <- do.call(c,out_list$simout_list)
+  simout_mat <- do.call(cbind, lapply(simout_flat, function(df) df$n_SI))
+  
+  return(list(x_mat=x_mat, 
+              y_vec=y_vec, 
+              y_native=y_native, 
+              simout_mat=simout_mat))
+}
+
+res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
+res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
+res_fixed_hetGP <- collect_results(out_fixed_hetGP)
+res_adaptive_hetGP <- collect_results(out_adaptive_hetGP)
+```
+
+
+```{r}
+x_list <- out_fixed_CRNGP$X_list
+plot(x_list[[1]][,1:2], col=alpha(rgb(0,0,0), 0.5))
+points(0.45, 0.35, col='blue')
+for(i in 2:length(x_list)){
+  points(x_list[[i]][,1:2], col=alpha(rgb(0,0,0), 0.5))
+}
+
+```
+
+
+```{r}
+pairs_plot(res_fixed_CRNGP$x_mat,
+           res_adaptive_CRNGP$x_mat,
+           res_fixed_hetGP$x_mat,
+           res_adaptive_hetGP$x_mat)
+```
+
+```{r}
+for(ii in c(10, 30, 50, 80, 100)){
+  print(plot_nbest_traj(nbest = ii, 
+                        res_fixed_CRNGP$x_mat, 
+                        res_adaptive_CRNGP$x_mat, 
+                        res_fixed_CRNGP$y_vec, 
+                        res_adaptive_CRNGP$y_vec, 
+                        yobs = ytrue_vec))
+  # print(err_hist(nbest = ii, y_fixed_native, y_adaptive_native))
+}
+```
+```{r, fig.width=14, fig.height=7}
+nbests <- seq(20, sim_budget, length.out = 6)
+par(mfrow = c(2, 3))
+for(nbest in nbests){
+  plot_pct_traj2(nbest, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+}
+```
+
+```{r}
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+
+n = 50
+nbest = 10
+
+res_fixed <- best_so_far(res_fixed_CRNGP$y_native, m=nbest, n=n)
+res_adaptive <- best_so_far(res_adaptive_CRNGP$y_native, m=nbest, n=n)
+res_fixed_het <- best_so_far(res_fixed_hetGP$y_native, m=nbest, n=n)
+res_adaptive_het <- best_so_far(res_adaptive_hetGP$y_native, m=nbest, n=n)
+
+labs = c("CRN-adaptive", "CRN-fixed")
+xax_fixed = (1:length(res_fixed)) + n
+xax_adapt = (1:length(res_adaptive)) + n
+
+plot(xax_adapt, res_adaptive, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("nbest = ", nbest))
+points(xax_fixed, res_fixed, pch = 19, col = alpha("#00BA38", 1), type = "l")
+legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+
+```
+
+
+```{r}
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+
+```
+
+
+```{r}
+config <- read.csv('../experiments/config.csv')
+
+best_so_far <- function(v, m=10, n=50){
+  # m is number of best points to aggregate over
+  # n is number of initial designs (not factoring into performance)
+
+  # Initialize a result vector to store means
+  result <- numeric(length(v) - n + 1)
+  
+  # Loop through all indices from n to N
+  for (i in n:length(v)) {
+    # Extract the subset of the vector starting from the current index i
+    subset_v <- v[1:i]
+    
+    # Get the m smallest elements from the subset
+    m_smallest <- sort(subset_v)[1:min(m, length(subset_v))]
+    
+    # Calculate the mean of the m smallest elements
+    result[i - n + 1] <- mean(m_smallest)
+  }
+  return(result)
+}
+
+auc_trapezoids<- function(y){
+  x <- seq_along(y)
+  # want zero to be reference
+  
+  auc <- sum((y[-1] + y[-length(y)]) * diff(x) / 2)
+  return(auc)
+}
+
+
+n <- 50
+nbest <- 10
+
+```
+
+```{r}
+load(sprintf("../experiments/experiments/exp_%d/out.RData", 1))
+y_fixed_crn <- unlist(out_fixed_CRNGP[[2]])
+y_adapt_crn <- unlist(out_adaptive_CRNGP[[2]])
+y_fixed_het <- unlist(out_fixed_hetGP[[2]])
+y_adapt_het <- unlist(out_adaptive_hetGP[[2]])
+```
+
+```{r}
+exp <- 1
+exp_auc <- function(exp, n, nbest){
+  load(sprintf("../experiments/experiments/exp_%d/out.RData", exp))
+  
+  y_fixed_crn <- unlist(out_fixed_CRNGP[[2]])
+  y_adapt_crn <- unlist(out_adaptive_CRNGP[[2]])
+  y_fixed_het <- unlist(out_fixed_hetGP[[2]])
+  y_adapt_het <- unlist(out_adaptive_hetGP[[2]])
+  
+  
+  # negative makes auc weird
+  ymin <- min(y_fixed_crn, y_adapt_crn, y_fixed_het, y_adapt_het)
+  ymax <- max(y_fixed_crn, y_adapt_crn, y_fixed_het, y_adapt_het)
+  
+  y_fixed_crn <- y_fixed_crn - ymin
+  y_adapt_crn <- y_adapt_crn - ymin
+  y_fixed_het <- y_fixed_het - ymin
+  y_adapt_het <- y_adapt_het - ymin
+  
+  res_fixed_crn <- best_so_far(y_fixed_crn, m=nbest, n=n)
+  res_adaptive_crn <- best_so_far(y_adapt_crn, m=nbest, n=n)
+  res_fixed_het <- best_so_far(y_fixed_het, m=nbest, n=n)
+  res_adaptive_het <- best_so_far(y_adapt_het, m=nbest, n=n)
+  
+  labs = c("CRN-adaptive", "CRN-fixed", "Het-adaptive", "Het-fixed")
+  xax_fixed_crn = (1:length(res_fixed_crn)) + n
+  xax_adapt_crn = (1:length(res_adaptive_crn)) + n
+  xax_fixed_het = (1:length(res_fixed_het)) + n
+  xax_adapt_het = (1:length(res_adaptive_het)) + n
+  
+  plot(xax_adapt_crn, res_adaptive_crn, pch = 19, col = alpha("#F8766D", 01), type = "l", 
+     xlab = "budget", ylab = paste("mse of best", nbest), main = paste("Experiment", exp))
+  points(xax_fixed_crn, res_fixed_crn, pch = 19, col = alpha("#00BA38", 1), type = "l")
+  points(xax_adapt_het, res_adaptive_het, pch = 19, col = alpha("#4287f5", 1), type = "l")
+  points(xax_fixed_het, res_fixed_het, pch = 19, col = alpha("#f5c842", 1), type = "l")
+  legend("topright", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38", "#4287f5", "#f5c842"))
+
+  
+  auc_fixed_crn <- auc_trapezoids(res_fixed_crn)
+  auc_adapt_crn <- auc_trapezoids(res_adaptive_crn)
+  auc_fixed_het <- auc_trapezoids(res_fixed_het)
+  auc_adapt_het <- auc_trapezoids(res_adaptive_het)
+  
+  auc_out <- list(auc_fixed_crn=auc_fixed_crn,
+               auc_adapt_crn=auc_adapt_crn,
+               auc_fixed_het=auc_fixed_het,
+               auc_adapt_het=auc_adapt_het,
+               #auc_delta=(auc_adapt-auc_fixed)/auc_fixed,
+               auc_fixed_crn_pct = auc_fixed_crn/(ymax * length(res_fixed_crn)),
+               auc_adaptive_crn_pct = auc_adapt_crn/(ymax * length(res_adaptive_crn)),
+               auc_fixed_het_pct = auc_fixed_het/(ymax * length(res_fixed_het)),
+               auc_adaptive_het_pct = auc_adapt_het/(ymax * length(res_adaptive_het)))
+  return(auc_out)
+}
+
+```
+
+
+```{r}
+exp_auc(1, n=n, nbest=nbest)
+```
+
+```{r}
+par(mfrow = c(1, 3))
+for(nbest in c(10, 20, 50)){
+  exp_auc(1, n=n, nbest=nbest)
+}
+
+```
+
+
+
+```{r}
+BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/"
+exp_seed <- 1
+init_npar <- c(5, 10)
+nrep <- c(10, 20)
+sim_budget <- c(200, 400, 600)
+grid_npar <- c(100, 200)
+nTS_samp <- c(10, 20, 30)
+
+
+d <- expand.grid(exp_seed, init_npar, nrep, sim_budget, grid_npar, nTS_samp)
+colnames(d) <- c("exp_seed", "init_npar", "nrep", "sim_budget", "grid_npar", "nTS_samp")
+
+d_eff <- d[d$init_npar * d$nrep < d$sim_budget, ]
+d_eff$exp_id <- paste0("exp_", 1:nrow(d_eff))
+
+d_eff <- d_eff[, c(7, 1:6)]
+d_eff$exp_path <- paste0(BASE_DIR, d_eff$exp_id, "/")
+```
+
+
+```{r}
+result <- do.call(rbind, lapply(1:66, function(x) {
+  output <- exp_auc(x, n, nbest=10)  # Get the named list
+  c(exp_id = sprintf("exp_%d", x), output)      # Combine the input with the list
+}))
+
+# Convert to a data.frame
+result_df <- as.data.frame(result, stringsAsFactors = FALSE)
+```
+```{r}
+result_df <- as.data.frame(merge(d_eff, result_df))
+```
+
+
+```{r}
+library(tidyr)
+cols <-  c("init_npar","nrep","sim_budget","grid_npar","nTS_samp", "auc_fixed_crn_pct","auc_adaptive_crn_pct", "auc_fixed_het_pct","auc_adaptive_het_pct")
+
+melted_df <- result_df[,cols] %>%
+  pivot_longer(
+    cols = c("auc_fixed_crn_pct", "auc_adaptive_crn_pct", "auc_fixed_het_pct","auc_adaptive_het_pct"),
+    names_to = "method",
+    values_to = "auc_value"
+  )
+
+melted_df$auc = unlist(melted_df$auc_value)
+melted_df$method <- sub("auc_", "", melted_df$method)
+```
+
+
+
+```{r}
+ggplot(melted_df, aes(x = factor(init_npar), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nrep), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(sim_budget), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(grid_npar), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nTS_samp), y = auc, fill = method)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    theme_minimal()
+```
+
+```{r}
+par(mfrow = c(3, 2))
+
+ggplot(melted_df, aes(x = factor(init_npar), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nrep), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(sim_budget), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(grid_npar), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+
+ggplot(melted_df, aes(x = factor(nTS_samp), y = auc, fill = method)) +
+    geom_bar(stat="identity", position="dodge") +
+    theme_minimal()
+```
+
+
+```{r}
+nbest <- 20
+y1 <- res_adaptive_CRNGP$y_native
+y2 <- res_fixed_CRNGP$y_native
+labs = c("CRN-adaptive", "CRN-fixed")
+nerror_ticks=20
+
+y_df <- data.frame(y = c(y1[order(y1)][1:nbest], 
+                         y2[order(y2)][1:nbest]),
+                   type = rep(labs, each = nbest))
+
+error_ticks <- seq(0, max(y_df$y), length.out = nerror_ticks)
+pctraj_1 <- pctraj_2 <- rep(NA, nerror_ticks)
+
+for (ii in 1:nerror_ticks){
+  pctraj_1[ii] <- mean(y_df$y[y_df$type == labs[1]] < error_ticks[ii])
+  pctraj_2[ii] <- mean(y_df$y[y_df$type == labs[2]] < error_ticks[ii])
+}
+
+plot(error_ticks, pctraj_1, pch = 19, col = alpha("#F8766D", 01), type = "b", 
+     xlab = "sum-squared-error", ylab = "% best traj", main = paste("nbest = ", nbest))
+points(error_ticks, pctraj_2, pch = 19, col = alpha("#00BA38", 1), type = "b")
+legend("topleft", labs, pch = 19, lty = 1, col = c("#F8766D", "#00BA38"))
+```
+
+
+```{r, fig.width=7, fig.height=3}
+par(mfrow = c(1, 3))
+area_under_curve(nbests, res_adaptive_CRNGP$y_native, res_fixed_CRNGP$y_native, labs = c("CRN-adaptive", "CRN-fixed"))
+area_under_curve(nbests, res_adaptive_hetGP$y_native, res_fixed_hetGP$y_native, labs = c("het-adaptive", "het-fixed"))
+area_under_curve(nbests, res_adaptive_CRNGP$y_native, res_adaptive_hetGP$y_native, labs = c("CRN-adaptive", "het-adaptive"))
+```
+
+```{r}
+y1 <- res_adaptive_CRNGP$y_native
+y2 <- res_fixed_CRNGP$y_native
+threshold <- 200
+
+y1 <- sqrt(y1)
+y2 <- sqrt(y2)
+
+
+```
+
+
+```{r}
+library(laGP)
+x <- c(1, 2, 3, 4, 12)
+y <- c(0, -1.75, -2, -0.5, 5)
+
+gpi <- newGP(matrix(x, ncol=1), y, d=10, g=1e-8)
+xx <- seq(0, 13, length=1000)
+p <- predGP(gpi, matrix(xx, ncol=1), lite=TRUE)
+
+m <- which.min(y)
+fmin <- y[m]
+d <- fmin - p$mean
+s <- sqrt(p$s2)
+dn <- d/s
+ei <- d*pnorm(dn) + s*dnorm(dn)
+```

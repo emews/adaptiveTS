@@ -368,15 +368,15 @@ submit_emews <- function(design_points, task_queue, exp_id, task_type) {
 #' @return sum of squared difference between simulated and observed trajectory
 
 obj_h <- function(output_file, gt_h_file, 
-                  start_date = as.Date('2020-03-17'), 
-                  end_date = as.Date("2020-06-13")){
+                  start_date = as.IDate('2020-04-02'), 
+                  end_date = as.IDate("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
                               select = c("tick", "hosp_r_count", "hosp_icu_r_count",
                                          "hosp_d_count", "hosp_icu_d_count",
                                          "icu_r_count", "icu_d_count"))
-  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
   sim_df[, total_hosp_sim := rowSums(.SD), .SDcols = patterns("count$")]
   
   ## process ground truth
@@ -400,13 +400,13 @@ obj_h <- function(output_file, gt_h_file,
 #' @return sum of squared difference between simulated and observed trajectory
 
 obj_d <- function(output_file, gt_d_file, 
-                  start_date = as.Date('2020-03-17'), 
-                  end_date = as.Date("2020-06-13")){
+                  start_date = as.IDate('2020-03-24'), 
+                  end_date = as.IDate("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
                               select = c("tick", "dead_count"))
-  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
   
   ## process ground truth
   gt_df <- data.table::fread(gt_d_file)
@@ -433,7 +433,7 @@ obj_d <- function(output_file, gt_d_file,
 #' @return sum of relative errors between simulated and observed trajectories
 
 obj_dh <- function(output_file, gt_h_file, gt_d_file, 
-                   start_date = as.Date('2020-03-17'), 
+                   start_date = as.Date('2020-03-16'), 
                    end_date = as.Date("2020-06-13")){
   
   ## process simulation
@@ -441,7 +441,7 @@ obj_dh <- function(output_file, gt_h_file, gt_d_file,
                               select = c("tick", "hosp_r_count", "hosp_icu_r_count",
                                          "hosp_d_count", "hosp_icu_d_count",
                                          "icu_r_count", "icu_d_count", "dead_count"))
-  sim_df[, date := as.IDate("2020-03-16") + (tick / 24)]
+  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
   sim_df[, total_hosp_sim := hosp_r_count + hosp_icu_r_count +
            hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count]
   
@@ -456,12 +456,14 @@ obj_dh <- function(output_file, gt_h_file, gt_d_file,
   gt_h_df <- gt_h_df[!is.na(tot.hosp)]
   
   ## merge
-  df_all <- merge(sim_df, gt_h_df, by = "date", all.y = TRUE)
-  df_all <- merge(df_all, gt_d_df, by = "date", all.x = TRUE)
+  df_h <- merge(sim_df, gt_h_df, by = "date", all.y = TRUE)
+  df_d <- merge(sim_df, gt_d_df, by = "date", all.y = TRUE)
+  # df_all <- merge(df_all, gt_d_df, by = "date", all.x = TRUE)
   
-  df_all[, err:= abs(tot.hosp - total_hosp_sim)/tot.hosp + abs(deaths - dead_count)/deaths]
+  df_h[, err:= abs(tot.hosp - total_hosp_sim)/tot.hosp]
+  df_d[, err:= abs(deaths - dead_count)/deaths]
   
-  return(sum(df_all$err))
+  return(sum(df_h$err) + sum(df_d$err))
   
 }
 

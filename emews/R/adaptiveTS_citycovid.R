@@ -434,7 +434,7 @@ obj_d <- function(output_file, gt_d_file,
 
 obj_dh <- function(output_file, gt_h_file, gt_d_file, 
                    start_date = as.Date('2020-03-16'), 
-                   end_date = as.Date("2020-06-13")){
+                   end_date = as.Date("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
@@ -471,8 +471,8 @@ obj_citycovid <- function(output_files,
                           objective,
                           gt_h_file, 
                           gt_d_file, 
-                          start_date = as.Date('2020-03-17'), 
-                          end_date = as.Date("2020-06-13")){
+                          start_date = as.Date('2020-03-16'), 
+                          end_date = as.Date("2020-05-30")){
   if (objective == 'hosp'){
     y <- unlist(lapply(output_files, obj_h, gt_h_file = gt_h_file))
   }

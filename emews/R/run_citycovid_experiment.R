@@ -49,9 +49,12 @@ run <- function(exp_id, params) {
       task_queue <- init_task_queue(eqsql, params$db_host, params$db_user, params$db_port,
                                     params$db_name)
 
-      if (!task_queue$are_queues_empty()) {
+      task_type <- params$task_type
+      if (!task_queue$are_queues_empty(task_type)) {
         print("WARNING: task input / output queues are not empty. Aborting run")
-        task_queue$clear_queues()
+        # task_queue$clear_queues()
+        stop(paste0("Queues not empty for task type ", task_type))
+
       }
       pool_params <- eqsql$worker_pool$cfg_file_to_dict(params$pool_cfg_file)
       params$worker_pool_id <- 'adaptive_ts'

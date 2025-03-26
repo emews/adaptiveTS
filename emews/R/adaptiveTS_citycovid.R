@@ -361,27 +361,29 @@ submit_emews <- function(design_points, task_queue, exp_id, task_type) {
 # gt_d_file <- "/lcrc/project/EMEWS/afadikar/git/CityCOVID_DA/data/dt.chicago.deaths.csv"
 #'
 #' @param output_file path to the CityCOVID count file
+#' @param sim_start_date 
+#' @param interval_start_date 
+#' @param interval_end_date 
 #' @param gt_h_file path to the chicago ground truth hospitalization
-#' @param start_date beginning date of calibration period
-#' @param end_date end date of calibration period
 #'
 #' @return sum of squared difference between simulated and observed trajectory
 
 obj_h <- function(output_file, gt_h_file, 
-                  start_date = as.IDate('2020-04-02'), 
-                  end_date = as.IDate("2020-05-30")){
+                  sim_start_date = as.IDate('2020-03-02'),
+                  interval_start_date = as.IDate('2020-04-02'), 
+                  interval_end_date = as.IDate("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
                               select = c("tick", "hosp_r_count", "hosp_icu_r_count",
                                          "hosp_d_count", "hosp_icu_d_count",
                                          "icu_r_count", "icu_d_count"))
-  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
+  sim_df[, sim_start_date + floor(tick / 24) - 1]
   sim_df[, total_hosp_sim := rowSums(.SD), .SDcols = patterns("count$")]
   
   ## process ground truth
   gt_df <- data.table::fread(gt_h_file)
-  gt_df <- gt_df[(date >= start_date) & (date <= end_date)]
+  gt_df <- gt_df[(date >= interval_start_date) & (date <= interval_end_date)]
   gt_df <- gt_df[!is.na(tot.hosp)]
   
   ## merge
@@ -394,23 +396,25 @@ obj_h <- function(output_file, gt_h_file,
 #'
 #' @param output_file path to the CityCOVID count file
 #' @param gt_d_file path to the chicago ground truth deaths
-#' @param start_date beginning date of calibration period
-#' @param end_date end date of calibration period
+#' @param interval_start_date beginning date of calibration period
+#' @param interval_end_date end date of calibration period
+#' @param sim_start_date simulation start date
 #'
 #' @return sum of squared difference between simulated and observed trajectory
 
 obj_d <- function(output_file, gt_d_file, 
-                  start_date = as.IDate('2020-03-24'), 
-                  end_date = as.IDate("2020-05-30")){
+                  sim_start_date = as.IDate('2020-03-02'),
+                  interval_start_date = as.IDate('2020-03-16'), 
+                  interval_end_date = as.IDate("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
                               select = c("tick", "dead_count"))
-  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
+  sim_df[, date := sim_start_date + floor(tick / 24) - 1]
   
   ## process ground truth
   gt_df <- data.table::fread(gt_d_file)
-  gt_df <- gt_df[(date >= start_date) & (date <= end_date)]
+  gt_df <- gt_df[(date >= interval_start_date) & (date <= interval_end_date)]
   gt_df <- gt_df[!is.na(deaths)]
   
   ## merge
@@ -433,15 +437,16 @@ obj_d <- function(output_file, gt_d_file,
 #' @return sum of relative errors between simulated and observed trajectories
 
 obj_dh <- function(output_file, gt_h_file, gt_d_file, 
-                   start_date = as.Date('2020-03-16'), 
-                   end_date = as.Date("2020-05-30")){
+                   sim_start_date = as.IDate('2020-03-02'),
+                   interval_start_date = as.IDate('2020-03-16'), 
+                   interval_end_date = as.IDate("2020-05-30")){
   
   ## process simulation
   sim_df <- data.table::fread(output_file,
                               select = c("tick", "hosp_r_count", "hosp_icu_r_count",
                                          "hosp_d_count", "hosp_icu_d_count",
                                          "icu_r_count", "icu_d_count", "dead_count"))
-  sim_df[, date := as.IDate("2020-03-02") + (tick / 24)]
+  sim_df[, date := sim_start_date + floor(tick / 24) - 1]
   sim_df[, total_hosp_sim := hosp_r_count + hosp_icu_r_count +
            hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count]
   
@@ -449,8 +454,8 @@ obj_dh <- function(output_file, gt_h_file, gt_d_file,
   gt_d_df <- data.table::fread(gt_d_file)
   gt_h_df <- data.table::fread(gt_h_file)
   
-  gt_d_df <- gt_d_df[(date >= start_date) & (date <= end_date)]
-  gt_h_df <- gt_h_df[(date >= start_date) & (date <= end_date)]
+  gt_d_df <- gt_d_df[(date >= interval_start_date) & (date <= interval_end_date)]
+  gt_h_df <- gt_h_df[(date >= interval_start_date) & (date <= interval_end_date)]
   
   gt_d_df <- gt_d_df[!is.na(deaths)]
   gt_h_df <- gt_h_df[!is.na(tot.hosp)]
@@ -471,8 +476,8 @@ obj_citycovid <- function(output_files,
                           objective,
                           gt_h_file, 
                           gt_d_file, 
-                          start_date = as.Date('2020-03-16'), 
-                          end_date = as.Date("2020-05-30")){
+                          interval_start_date = as.Date('2020-03-16'), 
+                          interval_end_date = as.Date("2020-05-30")){
   if (objective == 'hosp'){
     y <- unlist(lapply(output_files, obj_h, gt_h_file = gt_h_file))
   }

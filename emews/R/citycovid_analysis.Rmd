@@ -19,38 +19,174 @@ source("analysis_helpers.R")
 
 ```{r}
 experiment_tracker <- read.csv('experiment_tracker.csv')
+experiment_tracker
+```
 
-df1 <- combine_results(experiment_tracker$out_file[1], 
-                       experiment_tracker$experiment[1],
-                       experiment_tracker$summary_file[1])
-df2 <- combine_results(experiment_tracker$out_file[2], 
-                       experiment_tracker$experiment[2],
-                       experiment_tracker$summary_file[2])
-df3 <- combine_results(experiment_tracker$out_file[3], 
-                       experiment_tracker$experiment[3],
-                       experiment_tracker$summary_file[3])
+```{r}
+# df_list <- lapply(seq_len(nrow(experiment_tracker)), function(i) {
 
-# combine
-df <- rbind(df1, df2, df3)
+df_list <- lapply(4:5, function(i) {
+  combine_results(experiment_tracker$out_file[i],
+                  experiment_tracker$experiment[i],
+                  experiment_tracker$summary_file[i])
+})
+
+df <- do.call(rbind, df_list)
+```
+
+```{r}
+ggplot(df %>% group_by(experiment, iter) %>% summarise(y_std_mean=mean(y_std))) + 
+  geom_line(aes(x=iter, y=y_std_mean, color=experiment, group=experiment)) +
+  theme_minimal()
 
 ggplot(df) + 
   geom_line(aes(x=budget,y=y_std,color=experiment,group=experiment))+
   theme_minimal()
 ```
 
-A bit more aggregated (by iteration, I guess)?
+Load ground truth:
 ```{r}
-ggplot(df %>% group_by(experiment, iter) %>% summarise(y_std_mean=mean(y_std))) + 
-  geom_line(aes(x=iter, y=y_std_mean, color=experiment, group=experiment)) +
+sim_start_date = as.Date('2020-03-02')
+interval_start_date = as.Date('2020-03-16')
+interval_end_date = as.Date("2020-05-31")
+file_suffix <- '/output/counts_r1.csv'
+
+gt_h_file = '../data/calibration_targets/dt.chicago.hosp.csv'
+gt_d_file = '../data/calibration_targets/dt.chicago.deaths.csv'
+
+# load ground_truth truth
+gt_d_df <- read_csv(gt_d_file, col_types = cols()) %>%
+  filter(date >= interval_start_date & date <= interval_end_date) %>%
+  drop_na(deaths)
+
+gt_h_df <- read_csv(gt_h_file, col_types = cols()) %>%
+  filter(date >= interval_start_date & date <= interval_end_date) %>%
+  rename(hosp = tot.hosp) %>%
+  drop_na(hosp)
+
+gt_df <- merge(gt_d_df, gt_h_df, by='date') %>% 
+  pivot_longer(cols=c(deaths, hosp), names_to='type', values_to='val')
+```
+
+
+
+```{r}
+both2k <- df %>% 
+  filter(experiment=='both2k_fixed') %>% 
+  arrange(y_std) %>%
+  mutate(count_file=paste0(instance_dir, file_suffix))
+
+output_files <- both2k$count_file[1:20]
+sim_start_date <- as.Date('2020-03-02')
+
+all_sim_data <- map_dfr(output_files, ~ {
+  read_csv(.x, col_types = cols()) %>%
+    select(tick, hosp_r_count, hosp_icu_r_count, hosp_d_count, hosp_icu_d_count, icu_r_count, icu_d_count, dead_count) %>%
+    mutate(
+      date = sim_start_date + (tick / 24),
+      hosp = hosp_r_count + hosp_icu_r_count + hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count,
+      deaths = dead_count,
+      count_file = .x  # optional: keep track of which file each row came from
+    ) %>%
+    filter(date >= min(gt_df$date) & date <= max(gt_df$date)) %>%
+    select('tick', 'date', 'deaths', 'hosp', 'count_file')
+})
+
+best_trajectories <- merge(both2k, all_sim_data, by='count_file')
+
+sim_df <- best_trajectories %>% 
+  select(instance, date, deaths, hosp) %>%
+  pivot_longer(cols=c(deaths, hosp), names_to='type', values_to='val')
+
+ggplot(sim_df) + 
+  geom_line(aes(x=date, y=val, group=instance), color='cornflowerblue', alpha=.25) +
+  geom_line(data=gt_df, aes(x=date, y=val)) +
+  facet_wrap(~type) +
   theme_minimal()
 ```
+
+
 ```{r}
-best_traj
+out <- readRDS(experiment_tracker$out_file[4])$out
+
+x_mat <- do.call(rbind, out$X_list)
+y_vec <- unlist(out$y_list)
+y_native <- unlist(out$ynative_list)
+iter_idx=unlist(mapply(rep, seq_along(out$X_list), sapply(out$X_list, nrow)))
+
+out_df <- as.tibble(x_mat)
+colnames(out_df) <- c('s2x', 'sah', 'ba', 'seed')
+out_df$y_std <- y_vec
+out_df$y <- y_native
+out_df$iter <- iter_idx
+out_df$budget <- 1:nrow(out_df)
+
+ggplot(out_df) + 
+  geom_point(aes(x=s2x, y=sah, color=iter)) +
+  theme_minimal()
+
+ggplot(out_df) + 
+  geom_point(aes(x=s2x, y=ba, color=iter)) +
+  theme_minimal()
+
+ggplot(out_df) + 
+  geom_point(aes(x=sah, y=ba, color=iter)) +
+  theme_minimal()
+
+ggplot(out_df) + 
+  geom_point(aes(x=s2x, y=seed, color=iter)) +
+  theme_minimal()
 ```
+
+
+```{r}
+deaths3k <- df %>% 
+  filter(experiment=='deaths3k_fixed') %>% 
+  arrange(y_std) %>%
+  mutate(count_file=paste0(instance_dir, file_suffix))
+
+
+output_files <- deaths3k$count_file[1:20]
+sim_start_date <- as.Date('2020-03-02')
+
+all_sim_data <- map_dfr(output_files, ~ {
+  read_csv(.x, col_types = cols()) %>%
+    select(tick, hosp_r_count, hosp_icu_r_count, hosp_d_count, hosp_icu_d_count, icu_r_count, icu_d_count, dead_count) %>%
+    mutate(
+      date = sim_start_date + (tick / 24),
+      hosp = hosp_r_count + hosp_icu_r_count + hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count,
+      deaths = dead_count,
+      count_file = .x  # optional: keep track of which file each row came from
+    ) %>%
+    filter(date >= min(gt_df$date) & date <= max(gt_df$date)) %>%
+    select('tick', 'date', 'deaths', 'hosp', 'count_file')
+})
+
+best_trajectories <- merge(deaths3k, all_sim_data, by='count_file')
+
+sim_df <- best_trajectories %>% 
+  select(instance, date, deaths, hosp) %>%
+  pivot_longer(cols=c(deaths, hosp), names_to='type', values_to='val')
+
+ggplot(sim_df) + 
+  geom_line(aes(x=date, y=val, group=instance), color='cornflowerblue', alpha=.25) +
+  geom_line(data=gt_df, aes(x=date, y=val)) +
+  facet_wrap(~type) +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
+
 ```{r}
 # update summary files to reflect new filepaths 
-df$instance_dir <- gsub('1.0-adaptive_ts_1742217498.163954', '3K_hospitalizations', df$instance_dir)
-df$instance_dir <- gsub('1.0-adaptive_ts_1742053883.049385', '2K_hospitalizations', df$instance_dir)
+#df$instance_dir <- gsub('1.0-adaptive_ts_1742217498.163954', '3K_hospitalizations', df$instance_dir)
+#df$instance_dir <- gsub('1.0-adaptive_ts_1742053883.049385', '2K_hospitalizations', df$instance_dir)
 
 # grab output files for best trajectories found with each experiment
 best_traj <- df %>%
@@ -66,8 +202,6 @@ traj1 = prepare_trajectories(paste0(best_traj$instance_dir[1],file_suffix), melt
 traj1$experiment <- best_traj$experiment[1]
 traj2 = prepare_trajectories(paste0(best_traj$instance_dir[2],file_suffix), melted=TRUE)
 traj2$experiment <- best_traj$experiment[2]
-traj3 = prepare_trajectories(paste0(best_traj$instance_dir[3],file_suffix), melted=TRUE)
-traj3$experiment <- best_traj$experiment[3]
 ```
 
 
@@ -82,12 +216,6 @@ ggplot(traj2) +
   geom_line(aes(x=date, y=val, color=type, group=type)) +
   facet_wrap(~metric) +
   ggtitle(best_traj$experiment[2]) +
-  theme_minimal()
-
-ggplot(traj3) + 
-  geom_line(aes(x=date, y=val, color=type, group=type)) +
-  facet_wrap(~metric) +
-  ggtitle(best_traj$experiment[3]) +
   theme_minimal()
 ```
 

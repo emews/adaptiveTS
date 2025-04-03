@@ -33,27 +33,32 @@ combine_results <- function(out_file,
   return(out_df)
 }
 
+load_trajectories <- function(output_files,
+                              sim_start_date=as.Date('2020-03-02')){
+  
+}
 
 prepare_trajectories <- function(output_file, 
                                  gt_h_file = '../data/calibration_targets/dt.chicago.hosp.csv',
                                  gt_d_file = '../data/calibration_targets/dt.chicago.deaths.csv',
-                                 start_date = as.Date('2020-03-17'),
-                                 end_date = as.Date("2020-06-13"),
+                                 sim_start_date = as.Date('2020-03-02'),
+                                 interval_start_date = as.Date('2020-03-16'),
+                                 interval_end_date = as.Date("2020-05-31"),
                                  melted = TRUE) {
   
   # Load simulation data
   sim_df <- read_csv(output_file, col_types = cols()) %>%
     select(tick, hosp_r_count, hosp_icu_r_count, hosp_d_count, hosp_icu_d_count, icu_r_count, icu_d_count, dead_count) %>%
-    mutate(date = as.Date("2020-03-16") + (tick / 24),
+    mutate(date = sim_start_date + (tick / 24),
            total_hosp_sim = hosp_r_count + hosp_icu_r_count + hosp_d_count + hosp_icu_d_count + icu_r_count + icu_d_count)
 
 # Load and filter ground truth data
 gt_d_df <- read_csv(gt_d_file, col_types = cols()) %>%
-  filter(date >= start_date & date <= end_date) %>%
+  filter(date >= interval_start_date & date <= interval_end_date) %>%
   drop_na(deaths)
 
 gt_h_df <- read_csv(gt_h_file, col_types = cols()) %>%
-  filter(date >= start_date & date <= end_date) %>%
+  filter(date >= interval_start_date & date <= interval_end_date) %>%
   drop_na(tot.hosp)
 
 # Merge simulation and ground truth

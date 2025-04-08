@@ -265,43 +265,26 @@ find_row_indices <- function(bigger_matrix, smaller_matrix) {
   return(match_indices)
 }
 
-scale_params <- function(x, bounds){
-  return(bounds[1] + x*(bounds[2]-bounds[1]))
-}
 
 #' Format parameters to EMEWS payload
 #'
-#' @param params vector of parameters to update payload
+#' @param inputs vector of parameters to update payload
+#' @param param_names vector of names of parameters being calibrated
+#' @param priors data.table of parameter priors
 
 #' @return json string in correct format
-generate_payload <- function(params, 
-                             bounds=list(c(.01, .15), 
-                                         c(0.1, 1),
-                                         c(0.01, 0.5))) {
-  # fixed
-  fixed_params <- list(
-    "infected.count" = 443.6,
-    "seasonality.multiplier" = 0.211,
-    "isolate.infectivity.household" = 0.471,
-    "shielding.scaling" = 0.967,
-    "isolate.infectivity.nursinghome" = 0.549,
-    "initial.exposure.tick" = 72 #day 3, right?
-  )
+generate_payload <- function(inputs, param_names, priors) {
+  params_dt <- data.table(param_name=c(param_names,'seed'), input_val=a)
+  payload <- merge(priors, params_dt, by="param_name", all=TRUE)
+  # port default value over for values not passed in function
+  payload[is.na(input_val), param_val := default_val]
+  payload[param_name=='seed', param_val := input_val] # port seed over
+  # scale the remaining parameters
+  payload[is.na(param_val), param_val := param_min + input_val*(param_max - param_min)]
   
-  # scaled inputs (must be in this order)
-  var_params <- list(
-    "susceptible.to.exposed.probability" = scale_params(params[1], bounds[[1]]),
-    "stay.at.home.probability" = scale_params(params[2], bounds[[2]]),
-    "stoe.behavioral.adjustment.probability" = scale_params(params[3], bounds[[3]]),
-    "seed" = params[4]
-  )
-  
-  # combine
-  all_params <- c(fixed_params, var_params)
-  
-  # json
-  json_string <- jsonlite::toJSON(all_params, auto_unbox = TRUE)
-  
+  # generate json
+  payload_list <- setNames(as.list(payload$param_val), payload$param_name)
+  json_string <- jsonlite::toJSON(payload_list, auto_unbox = TRUE)
   return(json_string)
 }
 
@@ -321,10 +304,10 @@ generate_payload <- function(params,
 #'
 #' @return List containing outputs, simulation details, etc.
 #' @export
-submit_emews <- function(design_points, task_queue, exp_id, task_type) {
+submit_emews <- function(design_points, param_names, priors, task_queue, exp_id, task_type) {
   # Submit all tasks to EMEWS
   fts <- apply(design_points, 1, function(a) {
-    payload <- generate_payload(a)
+    payload <- generate_payload(a, param_names, priors)
     submission <- task_queue$submit_task(exp_id, task_type, payload)
     submission[[2]]
   })
@@ -520,6 +503,7 @@ runAdaptiveTS <- function(exp_design,
                           exp_seed = NULL,
                           gt_h_file = NULL,
                           gt_d_file = NULL,
+                          priors_file = NULL,
                           ...) {
   
   # Set seed if provided
@@ -529,11 +513,13 @@ runAdaptiveTS <- function(exp_design,
   nrep <- exp_design$nrep
   nTS_samp <- exp_design$nTS_samp
   grid_npar <- exp_design$grid_npar
-  p <- exp_design$p
   prop_sig <- exp_design$prop_sig
   err_sig <- exp_design$err_sig
   ref <- exp_design$ref
   obj <- exp_design$objective
+  param_names <- exp_design$param_names
+  p <- length(param_names)
+  priors <- fread(priors_file)
   
   # Create initial design
   X_01 <- randomLHS(n = init_npar, k = p)
@@ -542,7 +528,7 @@ runAdaptiveTS <- function(exp_design,
   
   # Evaluate initial design
   print("Submitting Initial Design")
-  outfiles <- submit_emews(Xs_01, task_queue, exp_id, task_type)
+  outfiles <- submit_emews(Xs_01,  param_names, priors, task_queue, exp_id, task_type)
   y <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
   # print("Finished Initial Design Evaluation")
   
@@ -593,7 +579,7 @@ runAdaptiveTS <- function(exp_design,
     # print(paste0("xnew_m: ", xnew))
     
     ## evaluate new simulations 
-    outfiles <- submit_emews(xnew, task_queue, exp_id, task_type)
+    outfiles <- submit_emews(xnew,  param_names, priors, task_queue, exp_id, task_type)
     ynew <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
 
     X_list[[tt]] <- xnew

@@ -73,8 +73,9 @@ run <- function(exp_id, params) {
       exp_seed <- 1 # Is this correct to set here?
       gt_h_file <- params$gt_h_file
       gt_d_file <- params$gt_d_file
+      priors_file <- params$priors_file
       out <- runAdaptiveTS(exp_design, task_queue=task_queue, exp_id=exp_id, task_type=task_type, exp_seed = exp_seed,
-                           gt_h_file=gt_h_file, gt_d_file=gt_d_file, covtype = "Matern5_2")
+                           gt_h_file=gt_h_file, gt_d_file=gt_d_file, priors_file=priors_file, covtype = "Matern5_2")
 
       # save output
       saveRDS(list(out=out, exp_design=exp_design), file=paste0(params$results_directory, "/", exp_id, "_", "out.RData"))

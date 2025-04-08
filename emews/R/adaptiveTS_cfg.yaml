@@ -31,6 +31,8 @@ python_path: /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.
 worker_pool_id: default
 task_type: 1001
 gt_h_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/dt.chicago.hosp.csv
+gt_d_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/dt.chicago.deaths.csv
+priors_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/priors.csv
 ts_r_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/R/adaptiveTS_citycovid.R
 
 

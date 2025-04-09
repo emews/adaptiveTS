@@ -8,13 +8,13 @@ exp_design <- list(
   err_sig = 0.5,
   prop_sig = 0.3,
   ref = -2,
-  param_names = c('infected_count', 
-                  'susceptible_to_exposed_probability', 
-                  'seasonality_multiplier',
-                  'shielding_scaling', 
-                  'isolate_infectivity_household',
-                  'isolate_infectivity_nursinghome', 
-                  'initial_exposure_tick',
-                  'stay_at_home_probability', 
-                  'stoe_behavioral_adjustment_probability')
+  param_names = c('infected.count', 
+                  'susceptible.to.exposed.probability', 
+                  'seasonality.multiplier',
+                  'shielding.scaling', 
+                  'isolate.infectivity.household',
+                  'isolate.infectivity.nursinghome', 
+                  'initial.exposure.tick',
+                  'stay.at.home.probability', 
+                  'stoe.behavioral.adjustment.probability')
 )

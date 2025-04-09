@@ -274,7 +274,7 @@ find_row_indices <- function(bigger_matrix, smaller_matrix) {
 
 #' @return json string in correct format
 generate_payload <- function(inputs, param_names, priors) {
-  params_dt <- data.table(param_name=c(param_names,'seed'), input_val=a)
+  params_dt <- data.table(param_name=c(param_names,'seed'), input_val=inputs)
   payload <- merge(priors, params_dt, by="param_name", all=TRUE)
   # port default value over for values not passed in function
   payload[is.na(input_val), param_val := default_val]

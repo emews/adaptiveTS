@@ -2,7 +2,7 @@
 # ============================================================
 
 # Load required libraries
-library(hetGP)
+library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
 library(scales)
 library(data.table)
 library(lhs)
@@ -37,6 +37,9 @@ fitGP <- function(X, Y, GP_type, ...) {
   return(f)
 }
 
+# -----------------------------------------------------------
+# Log-Likelihood Evaluation Functions
+# -----------------------------------------------------------
 #' Calculate log-likelihood for comparing simulated outputs to true values
 #'
 #' @param ysim Simulated or predicted values
@@ -49,6 +52,24 @@ loglik <- function(ysim, ytrue, err_sig) {
   dnorm(ysim, ytrue, err_sig, log = TRUE)
 }
 
+#' Evaluate log-likelihood for design
+#'
+#' @param model Fitted GP model
+#' @param newX New input points
+#' @param ytrue Reference values
+#' @param err_sig Error standard deviation
+#'
+#' @return Log-likelihood values
+#' @export
+loglik_design <- function(model, newX, ytrue, err_sig) {
+  # Predict from fitted GP
+  pred <- predict(model, newX, xprime = newX)
+  
+  ll <- loglik(pred$mean, ytrue, err_sig)
+  return(ll)
+}
+
+ 
 # -----------------------------------------------------------
 # Grid Creation Functions
 # -----------------------------------------------------------
@@ -122,26 +143,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
   return(list(xsgrid_new, xsgrid_all, xsgrid_id))
 }
 
-# -----------------------------------------------------------
-# Log-Likelihood Evaluation Functions
-# -----------------------------------------------------------
 
-#' Evaluate log-likelihood for design
-#'
-#' @param model Fitted GP model
-#' @param newX New input points
-#' @param ytrue Reference values
-#' @param err_sig Error standard deviation
-#'
-#' @return Log-likelihood values
-#' @export
-loglik_design <- function(model, newX, ytrue, err_sig) {
-  # Predict from fitted GP
-  pred <- predict(model, newX, xprime = newX)
-  
-  ll <- loglik(pred$mean, ytrue, err_sig)
-  return(ll)
-}
 
 # -----------------------------------------------------------
 # Next Point Selection Functions
@@ -218,6 +220,7 @@ adaptive_CRN_TS <- function(model,
                             prop_sig,
                             nTS_samp) {
   
+  t0 <- Sys.time()
   # Create grid
   grid <- create_grid_CRNGP(grid_npar, 
                             nrep, 
@@ -225,19 +228,62 @@ adaptive_CRN_TS <- function(model,
                             ref, 
                             err_sig, 
                             prop_sig)
+  grid_time <- as.numeric(Sys.time() - t0, units='secs')
+  
   Xsgrid <- grid[[1]]
   Xsgrid_full <- grid[[2]]
   Xsgrid_id <- grid[[3]]
   
   # Predict
+  t0 <- Sys.time()
   pred <- predict(model, Xsgrid, xprime = Xsgrid)
+  pred_time <- as.numeric(Sys.time() - t0, units='secs')
+  t0 <- Sys.time()
   tTS <- MASS::mvrnorm(n = nTS_samp, 
                        mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
-  
+  mvnorm_time <- as.numeric(Sys.time() - t0, units='secs')
   best_ids <- apply(tTS, 1, which.min)
   best_ids <- unique(best_ids)
   
-  return(Xsgrid[best_ids, ])
+  return(list(newX=Xsgrid[best_ids, ], timetrack=list(generate_grid=grid_time, model_prediction=pred_time, mvnorm=mvnorm_time)))
+}
+
+adaptive_seed_CRN_TS <- function(model,
+                                 evaluated_Xs,
+                                 Xgrid_01,
+                                 nrep,
+                                 nTS_samp){
+  
+  ## create grid
+  eff_grid <- create_grid_CRNGP_seed(evaluated_Xs = evaluated_Xs,
+                                     Xgrid_01 = Xgrid_01,
+                                     nrep = nrep)
+  
+  Xsgrid <- eff_grid
+  
+  ## remove already evaluted points
+  evaluated_ids <- find_row_indices(Xsgrid, evaluated_Xs)
+  # eff_grid <- Xsgrid[-evaluated_ids, ]
+  
+  ## predict
+  # pred <- predict(model, eff_grid, xprime = eff_grid)
+  # tTS <- MASS::mvrnorm(n = nTS_samp,
+  #                      mu = pred$mean,
+  #                      Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  tTS <- simul(object = model, Xsgrid, ids = evaluated_ids,
+               nsim = nTS_samp, check = F)
+  
+  # best_ids <- apply(tTS, 1, which.min)
+  best_ids <- apply(tTS, 2, function(x){
+    m_tmp <- cbind(x, 1:length(x))
+    m_tmp <- m_tmp[-evaluated_ids, ]
+    ids <- which.min(m_tmp[, 1])
+    native_ids <- m_tmp[ids, 2]
+    return(native_ids)
+  })
+  best_ids <- sort(unique(best_ids))
+  
+  return(eff_grid[best_ids, ])
 }
 
 
@@ -337,78 +383,6 @@ submit_emews <- function(design_points, param_names, priors, task_queue, exp_id,
 # EMEWS submission
 # -----------------------------------------------------------
 
-
-#' Objective on hospitalization
-#' # output_file <- "/lcrc/project/EMEWS/improv/ncollier/repos/snl_brave_citycovid/experiments/stein_mcmc_01212025_1.0/instances/instance_0/output/counts_r0_0.csv"
-# gt_h_file <- "/lcrc/project/EMEWS/afadikar/git/CityCOVID_DA/data/dt.chicago.hosp.csv"
-# gt_d_file <- "/lcrc/project/EMEWS/afadikar/git/CityCOVID_DA/data/dt.chicago.deaths.csv"
-#'
-#' @param output_file path to the CityCOVID count file
-#' @param sim_start_date 
-#' @param interval_start_date 
-#' @param interval_end_date 
-#' @param gt_h_file path to the chicago ground truth hospitalization
-#'
-#' @return sum of squared difference between simulated and observed trajectory
-
-obj_h <- function(output_file, gt_h_file, 
-                  sim_start_date = as.IDate('2020-03-02'),
-                  interval_start_date = as.IDate('2020-04-02'), 
-                  interval_end_date = as.IDate("2020-05-30")){
-  
-  ## process simulation
-  sim_df <- data.table::fread(output_file,
-                              select = c("tick", "hosp_r_count", "hosp_icu_r_count",
-                                         "hosp_d_count", "hosp_icu_d_count",
-                                         "icu_r_count", "icu_d_count"))
-  sim_df[, sim_start_date + floor(tick / 24) - 1]
-  sim_df[, total_hosp_sim := rowSums(.SD), .SDcols = patterns("count$")]
-  
-  ## process ground truth
-  gt_df <- data.table::fread(gt_h_file)
-  gt_df <- gt_df[(date >= interval_start_date) & (date <= interval_end_date)]
-  gt_df <- gt_df[!is.na(tot.hosp)]
-  
-  ## merge
-  df_all <- merge(sim_df, gt_df, by = "date", all.y = TRUE)
-  
-  return(sum((df_all$tot.hosp - df_all$total_hosp_sim)^2))
-}
-
-#' Objective on deaths
-#'
-#' @param output_file path to the CityCOVID count file
-#' @param gt_d_file path to the chicago ground truth deaths
-#' @param interval_start_date beginning date of calibration period
-#' @param interval_end_date end date of calibration period
-#' @param sim_start_date simulation start date
-#'
-#' @return sum of squared difference between simulated and observed trajectory
-
-obj_d <- function(output_file, gt_d_file, 
-                  sim_start_date = as.IDate('2020-03-02'),
-                  interval_start_date = as.IDate('2020-03-16'), 
-                  interval_end_date = as.IDate("2020-05-30")){
-  
-  ## process simulation
-  sim_df <- data.table::fread(output_file,
-                              select = c("tick", "dead_count"))
-  sim_df[, date := sim_start_date + floor(tick / 24) - 1]
-  
-  ## process ground truth
-  gt_df <- data.table::fread(gt_d_file)
-  gt_df <- gt_df[(date >= interval_start_date) & (date <= interval_end_date)]
-  gt_df <- gt_df[!is.na(deaths)]
-  
-  ## merge
-  df_all <- merge(sim_df, gt_df, by = "date", all.y = TRUE)
-  
-  return(sum((df_all$dead_count - df_all$deaths)^2))
-  
-}
-
-
-
 #' Objective on hospitalizations and deaths
 #'
 #' @param output_file path to the CityCOVID count file
@@ -454,6 +428,7 @@ obj_dh <- function(output_file, gt_h_file, gt_d_file,
   return(sum(df_h$err) + sum(df_d$err))
   
 }
+
 
 obj_citycovid <- function(output_files,
                           objective,
@@ -528,7 +503,9 @@ runAdaptiveTS <- function(exp_design,
   
   # Evaluate initial design
   print("Submitting Initial Design")
+  t0 <- Sys.time()
   outfiles <- submit_emews(Xs_01,  param_names, priors, task_queue, exp_id, task_type)
+  emews_time <- as.numeric(Sys.time() - t0, units='secs')
   y <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
   # print("Finished Initial Design Evaluation")
   
@@ -540,17 +517,21 @@ runAdaptiveTS <- function(exp_design,
   # Initialize BO
   Xs <- Xs_01
   Y <- y_std
+  t0 <- Sys.time()
   f <- fitGP(Xs, Y, GP_type = "CRNGP", known = list(beta0 = 0), ...)
+  t_modelfit <- as.numeric(Sys.time() - t0, units='secs')
   
   # Track iterations
   no_of_sims <- length(y)
   X_list <- list()
   y_list <- list()
   ynative_list <- list()
+  timing_tracker <- list()
 
   X_list[[1]] <- Xs_01
   y_list[[1]] <- y_std
   ynative_list[[1]] <- y
+  timing_tracker[[1]] <- list(emews_sim=emews_time, modelfit=t_modelfit)
 
   
   # ================================
@@ -572,14 +553,17 @@ runAdaptiveTS <- function(exp_design,
                          nTS_samp = nTS_samp,
                          adaptive = T)
     
-    xnew <- out
+    xnew <- out$newX
+    timetrack <- out$timetrack
     # cat("xnew: ", xnew, "\n")
     flush.console()
     if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
     # print(paste0("xnew_m: ", xnew))
     
     ## evaluate new simulations 
+    t0 <- Sys.time()
     outfiles <- submit_emews(xnew,  param_names, priors, task_queue, exp_id, task_type)
+    emews_time <- as.numeric(Sys.time() - t0, units='secs')
     ynew <- obj_citycovid(outfiles, obj, gt_h_file, gt_d_file)
 
     X_list[[tt]] <- xnew
@@ -589,8 +573,13 @@ runAdaptiveTS <- function(exp_design,
     ## update surrogate
     Xs <- rbind(Xs, xnew)
     Y <- c(Y, y_list[[tt]])
+    t0 <- Sys.time()
     f <- fitGP(Xs, Y, GP_type = "CRNGP", 
                known = list(beta0 = 0), ...)
+    t_modelfit <- as.numeric(Sys.time() - t0, units='secs')
+    timetrack$emews_sim <- emews_time
+    timetrack$modelfit <- t_modelfit
+    timing_tracker[[tt]] <- timetrack
     
     no_of_sims <- no_of_sims + length(ynew)
     
@@ -602,6 +591,7 @@ runAdaptiveTS <- function(exp_design,
   return(list("X_list"=X_list, 
               "y_list"=y_list, 
               "ynative_list"=ynative_list,
+              "time_tracker"=timing_tracker,
               "final_model"=f,
               "standardization" = list("center" = ycenter, "scale" = ysd)))
 

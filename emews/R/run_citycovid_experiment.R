@@ -105,6 +105,7 @@ args <- commandArgs(trailingOnly = TRUE)
 exp_id <- args[1]
 params_file <- args[2]
 params <- parse_yaml_cfg(params_file)
+
 if (params$db_port == -1) {
     params$db_port = NULL
 }
@@ -113,7 +114,6 @@ source(params$ts_r_file)
 ## =================================
 ## BO experiment settings 
 source(params$exp_design_file)
-
 
 if (!file.exists(params$results_directory)) {
     dir.create(params$results_directory)

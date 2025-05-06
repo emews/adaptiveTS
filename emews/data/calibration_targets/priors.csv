@@ -5,6 +5,6 @@ seasonality.multiplier,0,0.5,0.221
 shielding.scaling,0.3,1.0,0.967
 isolate.infectivity.household,0.2,0.7,0.471
 isolate.infectivity.nursinghome,0.2,0.8,0.549
-initial.exposure.tick,24,240,72
+initial.exposure.tick,24,96,72
 stay.at.home.probability,0.1,1.0,
 stoe.behavioral.adjustment.probability,0.01,0.5,

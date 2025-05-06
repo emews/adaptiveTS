@@ -107,7 +107,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
   xsgrid_all <- c()
   xsgrid_id <- c()
   acc_prop <- c()
-  
+
   k <- 1
   for (ii in grid_ids) {
     if (nrow(xsgrid_new) < (nparam * nrep) || is.null(nrow(xsgrid_new))) {
@@ -140,7 +140,7 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
 
   # print(paste0("xsgrid_new: ", xsgrid_new))
   
-  return(list(xsgrid_new, xsgrid_all, xsgrid_id))
+  return(list(xsgrid_new, xsgrid_all, xsgrid_id, length(grid_ids), k))
 }
 
 
@@ -245,7 +245,11 @@ adaptive_CRN_TS <- function(model,
   best_ids <- apply(tTS, 1, which.min)
   best_ids <- unique(best_ids)
   
-  return(list(newX=Xsgrid[best_ids, ], timetrack=list(generate_grid=grid_time, model_prediction=pred_time, mvnorm=mvnorm_time)))
+  return(list(newX=Xsgrid[best_ids, ], timetrack=list(generate_grid=grid_time, 
+                                                      model_prediction=pred_time, 
+                                                      mvnorm=mvnorm_time,
+                                                      initial_grid=grid[[4]],
+                                                      grid_iterations=grid[[5]])))
 }
 
 adaptive_seed_CRN_TS <- function(model,

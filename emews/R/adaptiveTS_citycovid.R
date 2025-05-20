@@ -864,6 +864,13 @@ runAdaptiveTS <- function(exp_design,
                      prop_sig = prop_sig)
     
     xnew <- out$newX
+
+    if (gp_type == 'hetGP'){
+      # assign a seed to each xnew
+      sim_seeds <- sample(1000, nrow(xnew))
+      xnew <- cbind(xnew, sim_seeds)
+    }
+    
     timetrack <- out$timetrack
     # cat("xnew: ", xnew, "\n")
     flush.console()

@@ -1,6 +1,6 @@
 exp_design <- list(
   sim_budget = 3000, # Total simulation budget
-  init_npar = 30,    # Number of initial design points
+  init_npar = 20,    # Number of initial design points
   nrep = 30,         # Number of replications
   grid_npar = 100,    # Number of candidate points for grid
   nTS_samp = 100,    # Number of Thompson samples
@@ -9,7 +9,8 @@ exp_design <- list(
   prop_sig = 0.3,
   ref = -2,
   param_names = c('susceptible.to.exposed.probability', 
-                  'initial.exposure.tick',
                   'stay.at.home.probability', 
-                  'stoe.behavioral.adjustment.probability')
+                  'stoe.behavioral.adjustment.probability'),
+  gp_type = "hetGP", #one of (CRNGP, hetGP, homGP)
+  adaptive = F
 )

@@ -38,6 +38,11 @@ fitGP <- function(X, Y, GP_type, ...) {
 }
 
 # -----------------------------------------------------------
+# CRNGP FUNCTIONS
+# -----------------------------------------------------------
+
+
+# -----------------------------------------------------------
 # Log-Likelihood Evaluation Functions
 # -----------------------------------------------------------
 #' Calculate log-likelihood for comparing simulated outputs to true values
@@ -290,10 +295,297 @@ adaptive_seed_CRN_TS <- function(model,
   return(eff_grid[best_ids, ])
 }
 
+# -----------------------------------------------------------
+# HetGP Functions
+# -----------------------------------------------------------
+#' @param model 
+#' @param newX 
+#' @param ytrue 
+#' @param err_sig 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+loglik_design_het <- function(model, newX, ytrue, err_sig){
+  
+  # predict from fitted GP
+  pred <- predict(model, newX, xprime = newX)
+  pred_rand <- MASS::mvrnorm(n = 1, mu = pred$mean, 
+                             Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  
+  ll <- loglik(pred_rand, ytrue, err_sig)
+  return(ll)
+}
+
+
+#' Title
+#'
+#' @param nparam 
+#' @param nrep 
+#' @param p 
+#' @param model 
+#' @param Ytrue 
+#' @param err_sig 
+#' @param prop_sig 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+create_grid_GP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3){
+  
+  p <- ncol(model$X0)  # input dimension
+  
+  # lhs design to initialize
+  s <- sample(1000, nrep)
+  Xgrid_01 <- randomLHS(n = nparam, k = p)
+  Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], s)
+  
+  # calculate importance weights
+  w <- loglik_design_het(model = model, newX = Xsgrid_01[, -ncol(Xsgrid_01)],
+                         ytrue = ref, err_sig = err_sig)
+  w_prime <-  w - max(w)
+  w_norm <- exp(w_prime) / sum(exp(w_prime))
+  
+  # sample
+  grid_ids <- sample(1:nrow(Xsgrid_01), nrow(Xsgrid_01), prob = w_norm, replace = T)
+  grid_ids <- unique(grid_ids)
+  
+  # desnify
+  xsgrid_new <- c()
+  acc_prop <- c()
+  
+  k <- 1
+  for (ii in grid_ids){
+    
+    if(nrow(xsgrid_new) < (nparam*nrep) || is.null(nrow(xsgrid_new))) {
+      # old candidate
+      xs_old <- Xsgrid_01[ii, ]
+      # proposal
+      xs_can <- rnorm(p, xs_old[1:p], prop_sig)
+      # nrep_can <- sample.int(nrep, 1)
+      xs_can_mat <- matrix(rep(xs_can, each = nrep), nrow = nrep)
+      
+      # acceptance probability
+      if((all(xs_can[1:p] < 1)) & ((all(xs_can[1:p] > 0)))){
+        loglik_new_design <- loglik_design_het(xs_can_mat, model = model,
+                                               ref, err_sig)
+        
+        acc_prob <- loglik_new_design - w[ii]
+        
+        u <- log(runif(nrep))
+        selected_ids <- which(u < acc_prob)
+        
+        if(length(selected_ids) > 0){
+          selected_id <- sort(sample(selected_ids, ceiling(length(selected_ids)/2)))
+          xsgrid_new <- rbind(xsgrid_new, xs_can_mat[selected_id, ])
+        }
+        k <- k + 1
+        acc_prop <- c(acc_prop, 1)
+      } else {
+        acc_prop <- c(acc_prop, 0)
+      }
+    }
+  }
+  
+  return(xsgrid_new)
+}
+
+
+
+#' Title
+#'
+#' @param model 
+#' @param Xsgrid 
+#' @param evaluated_ids 
+#' @param nTS_samp 
+#' @param ... 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+fixed_het_TS <- function(model,
+                         Xgrid,
+                         # evaluated_ids,
+                         nTS_samp, ...){
+  
+  t0 <- Sys.time()
+  preds <- predict(model, x = Xgrid, xprime = Xgrid)
+  pred_time <- as.numeric(Sys.time() - t0, units='secs')
+  t0 <- Sys.time()
+  tTS <- MASS::mvrnorm(n = nTS_samp, mu = preds$mean, 
+                       Sigma = 1/2 * (preds$cov + t(preds$cov)))
+  mvnorm_time <- as.numeric(Sys.time() - t0, units='secs')
+  best_ids <- apply(tTS, 1, which.min)
+  return(list(newX=Xgrid[best_ids, ], timetrack=list(model_prediction=pred_time, 
+                                                      mvnorm=mvnorm_time)))
+}
+
+#' Title
+#'
+#' @param model 
+#' @param grid_npar 
+#' @param nrep 
+#' @param Ytrue 
+#' @param err_sig 
+#' @param prop_sig 
+#' @param nTS_samp 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+adaptive_het_TS <- function(model,
+                            grid_npar,
+                            nrep,
+                            ref,
+                            err_sig,
+                            prop_sig,
+                            nTS_samp){
+  
+  ## create grid
+  t0 <- Sys.time()
+  grid <- create_grid_GP(grid_npar, 
+                         nrep, 
+                         model, 
+                         ref, 
+                         err_sig, 
+                         prop_sig)
+  grid_time <- as.numeric(Sys.time() - t0, units='secs')
+  Xgrid <- grid
+  
+  ## predict
+  t0 <- Sys.time()
+  pred <- predict(model, Xgrid, xprime = Xgrid)
+  pred_time <- as.numeric(Sys.time() - t0, units='secs')
+  t0 <- Sys.time()
+  tTS <- MASS::mvrnorm(n = nTS_samp, 
+                       mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  mvnorm_time <- as.numeric(Sys.time() - t0, units='secs')
+  best_ids <- apply(tTS, 1, which.min)
+  return(list(newX=Xsgrid[best_ids, ], timetrack=list(generate_grid=grid_time, 
+                                                      model_prediction=pred_time, 
+                                                      mvnorm=mvnorm_time)))
+}
+
+
+#' @param model 
+#' @param Xsgrid 
+#' @param evaluated_ids 
+#' @param nTS_samp 
+#' @param adaptive 
+#' @param grid_npar 
+#' @param nrep 
+#' @param Ytrue 
+#' @param err_sig 
+#' @param prop_sig 
+#' @param ... 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+next_eval_het <- function(model, 
+                          Xgrid = NULL, 
+                          evaluated_ids = NULL,
+                          nTS_samp,
+                          adaptive = TRUE,
+                          grid_npar = NULL,
+                          nrep = NULL,
+                          ref = NULL,
+                          err_sig = NULL,
+                          prop_sig = NULL,
+                          ...){
+  
+  if(adaptive){
+    out <- adaptive_het_TS(model = model,
+                           grid_npar = grid_npar,
+                           nrep = nrep,
+                           ref = ref,
+                           err_sig = err_sig,
+                           prop_sig = prop_sig,
+                           nTS_samp = nTS_samp, ...)
+    
+  } else {
+    out <- fixed_het_TS(model = model,
+                        Xgrid = Xgrid,
+                        # evaluated_ids = evaluated_ids,
+                        nTS_samp = nTS_samp, ...)
+    
+    
+  }
+  return(out)
+}
+
+
 
 # -----------------------------------------------------------
 # Utility Functions
 # -----------------------------------------------------------
+#'
+#'Combined function to evalute next points for generic method
+#'
+#' @param model 
+#' @param Xsgrid 
+#' @param evaluated_ids 
+#' @param nTS_samp 
+#' @param adaptive 
+#' @param grid_npar 
+#' @param nrep 
+#' @param Ytrue 
+#' @param err_sig 
+#' @param prop_sig 
+#' @param ... 
+#'
+#' @return
+#' @export
+#'
+next_eval <- function(model, 
+                      Xgrid = NULL, 
+                      evaluated_ids = NULL,
+                      nTS_samp,
+                      GP_type,
+                      adaptive = TRUE,
+                      grid_npar = NULL,
+                      nrep = NULL,
+                      ref = NULL,
+                      err_sig = NULL,
+                      prop_sig = NULL,
+                      ...){
+  
+  if(adaptive & GP_type=='hetGP'){
+    out <- adaptive_het_TS(model = model,
+                           grid_npar = grid_npar,
+                           nrep = nrep,
+                           ref = ref,
+                           err_sig = err_sig,
+                           prop_sig = prop_sig,
+                           nTS_samp = nTS_samp, ...)
+    
+  } else if (!adaptive & GP_type=='hetGP') {
+    out <- fixed_het_TS(model = model,
+                        Xgrid = Xgrid,
+                        # evaluated_ids = evaluated_ids,
+                        nTS_samp = nTS_samp, ...)
+  } else if (GP_type=='CRNGP') {
+    out <- next_eval_CRN(model = f,
+                         grid_npar = grid_npar,
+                         nrep = nrep,
+                         ref = ref,
+                         err_sig = err_sig,
+                         prop_sig = prop_sig,
+                         nTS_samp = nTS_samp,
+                         adaptive = adaptive)
+  } else {
+    out <- NULL
+    print('not supported')
+  }
+  return(out)
+}
+
+
 
 #' Find indices of matching rows in a larger matrix
 #'
@@ -497,6 +789,8 @@ runAdaptiveTS <- function(exp_design,
   ref <- exp_design$ref
   obj <- exp_design$objective
   param_names <- exp_design$param_names
+  gp_type <- exp_design$gp_type
+  adaptive <- exp_design$adaptive
   p <- length(param_names)
   priors <- fread(priors_file)
   
@@ -522,7 +816,7 @@ runAdaptiveTS <- function(exp_design,
   Xs <- Xs_01
   Y <- y_std
   t0 <- Sys.time()
-  f <- fitGP(Xs, Y, GP_type = "CRNGP", known = list(beta0 = 0), ...)
+  f <- fitGP(Xs, Y, GP_type = gp_type, known = list(beta0 = 0), ...)
   t_modelfit <- as.numeric(Sys.time() - t0, units='secs')
   
   # Track iterations
@@ -544,18 +838,30 @@ runAdaptiveTS <- function(exp_design,
   # TS starts here
   tt <- 2
   cat("Starting Iterative Evaluations\n")
+  Xgrid_01 <- randomLHS(n = grid_npar, k = p) # for non-adaptive methods
   while(no_of_sims < sim_budget){
     # for (tt in 1:nTS_iter){
     print(f)
     cat("Num Sims: ", no_of_sims, "\n")
-    out <- next_eval_CRN(model = f,
-                         grid_npar = grid_npar,
-                         nrep = nrep,
-                         ref = ref,
-                         err_sig = err_sig,
-                         prop_sig = prop_sig,
-                         nTS_samp = nTS_samp,
-                         adaptive = T)
+    # out <- next_eval_CRN(model = f,
+    #                      grid_npar = grid_npar,
+    #                      nrep = nrep,
+    #                      ref = ref,
+    #                      err_sig = err_sig,
+    #                      prop_sig = prop_sig,
+    #                      nTS_samp = nTS_samp,
+    #                      adaptive = T)
+    
+    out <- next_eval(model=f, 
+                     Xgrid = Xgrid_01, 
+                     nTS_samp = nTS_samp,
+                     GP_type = gp_type,
+                     adaptive = adaptive,
+                     grid_npar = grid_npar,
+                     nrep = nrep,
+                     ref = ref,
+                     err_sig = err_sig,
+                     prop_sig = prop_sig)
     
     xnew <- out$newX
     timetrack <- out$timetrack
@@ -578,7 +884,7 @@ runAdaptiveTS <- function(exp_design,
     Xs <- rbind(Xs, xnew)
     Y <- c(Y, y_list[[tt]])
     t0 <- Sys.time()
-    f <- fitGP(Xs, Y, GP_type = "CRNGP", 
+    f <- fitGP(Xs, Y, GP_type = gp_type, 
                known = list(beta0 = 0), ...)
     t_modelfit <- as.numeric(Sys.time() - t0, units='secs')
     timetrack$emews_sim <- emews_time

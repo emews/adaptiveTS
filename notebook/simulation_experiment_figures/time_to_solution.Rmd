@@ -1,0 +1,243 @@
+---
+title: "time_to_solution"
+output: html_document
+---
+
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyr)
+library(dplyr)
+library(plotly)
+library(patchwork)
+library(ggExtra)
+library(cowplot)
+
+source("../../script/R/analysis_helpers.R")
+```
+
+```{r}
+exp_path  <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/all_methods_sweep/all_methods_sweep/results"
+config <- fread("~/argonne/projects/data_assimilation/adaptiveTS/emews/data/upfs/config_dedup.csv")
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+
+#all_out_lists <- lapply(1:max(config$exp_id), load5outputs, exp_path=exp_path, config=config)
+#saveRDS(all_out_lists, file = paste0(exp_path, "combined_out_lists.rds"))
+all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
+
+method_names <- c(
+  "fixed_crn" = "fCRN",      
+  "adaptive_crn"  = "aCRN",
+  "fixed_het"      = "fHet",
+  "adaptive_het"   = "aHet",
+  "fixed_crn_seed" = "fgCRN"
+)
+```
+
+
+TIME TO SOLUTION
+```{r}
+df_auc <- do.call(
+  rbind,
+  lapply(all_out_lists, function(x) {
+         threshold_budget_analysis(x, nout=5)$agg_auc
+  })
+)
+
+df_budget <- do.call(
+  rbind,
+  lapply(all_out_lists, function(x) {
+         threshold_budget_analysis(x, nout=5)$budget_df
+  })
+)
+
+
+df_auc <- merge(df_auc, config)
+df_auc$method <- method_names[df_auc$method]
+df_budget$method <- method_names[df_budget$method]
+```
+
+
+```{r}
+head(df_budget %>% filter(exp_id==31, threshold==15))
+```
+
+```{r}
+t = 15
+df_auc <- df_auc %>% 
+  mutate(auc_scaled=auc/(sim_budget**2))
+
+df_auc_agg <- df_auc %>% 
+  group_by(sim_budget, threshold, method, init_npar, nrep, grid_npar, nTS_samp) %>% 
+  summarise(rauc=mean(auc_scaled))
+
+df_budget_agg <- merge(df_budget, config) %>%
+  group_by(threshold, method, time, init_npar, nrep, grid_npar, nTS_samp) %>% 
+  summarise(trajectories_found=mean(trajectories_found))
+
+df_budget_agg <- merge(df_budget_agg, hyper_designs %>% filter(sim_budget==700))
+```
+```{r}
+df_budget_agg
+```
+```{r}
+df_budget_agg %>% 
+  filter(threshold==15, exp_design==2) %>% 
+  arrange(time)
+```
+
+
+```{r}
+df_budget_agg %>% group_by(threshold, exp_design, method) %>% 
+  arrange(time) %>%
+  summarise(
+    max_traj=max(trajectories_found),
+    rauc=auc_trapezoids(trajectories_found)/(700**2)
+    )
+```
+
+
+```{r}
+t<-15
+label_data = df_auc %>% filter(exp_id==31, threshold==t)
+  #filter(init_npar==10, nrep==20, grid_npar==100, nTS_samp==10, threshold==t)
+
+label_data$time = 650
+label_data$text_pos = c(35, 180, 125, 95, 70)
+
+# Filter your data
+#plot_data <- df_budget_agg %>% 
+#  filter(init_npar==10, nrep==20, grid_npar==100, nTS_samp==10, threshold==t, time<=700)
+plot_data <- df_budget %>%
+  filter(exp_id==31, threshold==15)
+
+plot_data$method <- factor(plot_data$method, levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
+
+
+# Plot with annotation
+fig <- ggplot(plot_data) + 
+  geom_line(aes(x = time, y = trajectories_found, color = method, group = method), size=.75) +
+  geom_text(
+    data = label_data,
+    aes(x = time, y = text_pos, 
+        #label =paste0("rAUC=", sprintf("%.3f", auc_scaled)), 
+        label=sprintf("%.3f", auc_scaled),
+        color = method),
+    hjust = -0.1,
+    fontface="bold",
+    show.legend=FALSE
+  ) +
+  theme_minimal() +
+  xlim(min(plot_data$time), max(plot_data$time) + 40)+
+  labs(
+    x = "Budget",
+    y = paste0("Trajectories found with RMSE < ",t),
+    color = "Method"
+  ) +
+ theme(
+    legend.position = c(0.15, 0.95),
+    legend.justification = c("left", "top"),
+  legend.background = element_rect(fill = "white", color = NA),
+    legend.box.background = element_blank()
+  )
+fig
+```
+
+
+```{r}
+# compute rauc across budgets
+# start measuring after initial design???
+
+df_budget <- merge(df_budget, config[,sim_budget:=NULL], by="exp_id")
+df_budget$init_nsims <- df_budget$init_npar*df_budget$nrep
+```
+
+
+```{r}
+df_auc_after_init <- do.call(rbind, lapply(c(300, 500, 700), 
+                  function(b){
+                    tmp <- df_budget %>% 
+                      filter(time>init_nsims, time<=b) %>% 
+                      group_by(exp_id, threshold, method) %>% 
+                      summarise(
+                        auc=auc_trapezoids(trajectories_found),
+                        auc_scaled = auc/(b-min(init_nsims))**2)
+                      tmp$sim_budget <- b
+                      return(tmp)
+                    }))
+df_auc_after_init <- merge(df_auc_after_init, config[,sim_budget:=NULL], by="exp_id")
+
+df_auc <- do.call(rbind, lapply(c(300, 500, 700), 
+                  function(b){
+                    tmp <- df_budget %>% 
+                      filter(time<=b) %>% 
+                      group_by(exp_id, threshold, method) %>% 
+                      summarise(
+                        auc=auc_trapezoids(trajectories_found),
+                        auc_scaled = auc/(b**2))
+                      tmp$sim_budget <- b
+                      return(tmp)
+                    }))
+
+
+df_auc <- merge(df_auc, config[,sim_budget:=NULL], by="exp_id")
+df_auc
+```
+
+```{r, fig.width=12, fig.height=4}
+df_auc_after_init$sim_budget_lab <- paste0("N[max]==", df_auc_after_init$sim_budget)
+df_auc_after_init$method <- factor(df_auc_after_init$method, levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
+df_auc_after_init$init_nsims <- df_auc_after_init$init_npar*df_auc_after_init$nrep
+
+fig <- ggplot(df_auc_after_init %>% filter(init_nsims==50)) + 
+  geom_boxplot(aes(x = factor(threshold), y = auc_scaled, fill = method)) +
+  facet_wrap(~sim_budget_lab, labeller = label_parsed) +
+  labs(
+    x = "Threshold (RMSE)",
+    y = "rAUC",
+    fill = "Method",
+    color = "Method"
+  ) +
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12)
+  ) 
+
+fig
+```
+
+```{r, fig.width=12, fig.height=4}
+df_auc$sim_budget_lab <- paste0("N[max]==", df_auc$sim_budget)
+df_auc$method <- factor(df_auc$method, levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
+df_auc$init_nsims <- df_auc$init_npar*df_auc$nrep
+
+fig <- ggplot(df_auc %>% filter(init_nsims==50)) + 
+  geom_boxplot(aes(x = factor(threshold), y = auc_scaled, fill = method)) +
+  facet_wrap(~sim_budget_lab, labeller = label_parsed) +
+  labs(
+    x = "Threshold (RMSE)",
+    y = "rAUC",
+    fill = "Method",
+    color = "Method"
+  ) +
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12)
+  ) 
+
+fig
+```

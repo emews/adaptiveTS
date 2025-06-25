@@ -1,0 +1,190 @@
+---
+title: "citycovid_plots"
+output: html_document
+---
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyverse)
+library(plotly)
+library(jsonlite)
+source("analysis_helpers.R")
+```
+
+
+
+Load and plot ground truth:
+```{r}
+gt_dfs <- process_gt()
+gt_d_df <- gt_dfs$deaths
+gt_h_df <- gt_dfs$hosp %>% rename(hosp=tot.hosp)
+
+gt_df <- merge(gt_d_df, gt_h_df, by='date') %>% 
+  pivot_longer(cols=c(deaths, hosp), names_to='type', values_to='val')
+
+gt_df$Date <- gt_df$date
+gt_df$type[gt_df$type == "deaths"] <- "Deaths"
+gt_df$type[gt_df$type == "hosp"] <- "Hospitalizations"
+gt_df$Count = gt_df$val
+
+gtp <- ggplot(gt_df) + 
+  geom_line(aes(x = Date, y = Count, color = type, group = type), size = 1) + 
+  labs(x=NULL, color = NULL) +
+  theme_minimal() +
+ scale_x_date(
+  date_labels = "%b %Y",        # Format: e.g., "Jun 2025"
+  date_breaks = "1 months",    # Show tick every 3 months
+  expand = expansion(add = c(1, 5))
+) +
+  theme(
+    legend.position = "inside",
+    legend.position.inside = c(0.8, 0.2),
+    legend.background = element_blank(),        # Remove box/background around legend
+    legend.text = element_text(size = 12),
+    axis.text.x = element_text(size=10)
+  )
+
+gtp
+```
+
+Load experiments to compare:
+```{r}
+experiment_tracker <- read.csv('experiment_tracker.csv')
+experiment_tracker
+```
+
+Just compare the 3 parameter versions for now:
+```{r}
+df <- rbindlist(lapply(2:3, function(i){
+    #exp_design <- readRDS(experiment_tracker$out_file[i])$exp_design
+    data <- combine_results(experiment_tracker$out_file[i],
+                      experiment_tracker$experiment[i],
+                      experiment_tracker$summary_file[i])
+    
+    data[, traj_rank := rank(y, ties.method = "first")]
+    data[, counts_file := paste0(instance_dir, "/output/counts_r1.csv")]
+    return(data)
+}), use.names = TRUE,fill=TRUE)
+```
+
+```{r}
+df_iter <- df[, .(best_in_iter = min(y), budget = max(budget)), by = .(experiment, iter)]
+
+df_iter[, best_so_far := cummin(best_in_iter), by = experiment]
+df[, best_so_far := cummin(y), by = experiment]
+
+
+ggplot(df_iter) +
+  geom_line(aes(x=iter, y=best_so_far, color=experiment)) +
+  theme_minimal()
+
+ggplot(df) +
+  geom_line(aes(x = budget, y = best_so_far, color = experiment)) +
+  geom_vline(data = df_iter, aes(xintercept = budget, color = experiment), alpha = 0.1) +
+  theme_minimal()
+
+ggplot(df) +
+  geom_line(aes(x = budget, y = log(best_so_far), color = experiment)) +
+  geom_vline(data = df_iter, aes(xintercept = budget, color = experiment), alpha = 0.1) +
+  geom_vline(data = df_iter[iter==1,], aes(xintercept = budget, color = experiment), alpha = 0.5) +
+  theme_minimal()
+
+```
+
+
+```{r}
+thresholds <- c(12, 15, 20)
+
+results <- rbindlist(lapply(thresholds, function(thresh) {
+  df[y < thresh, .(count = .N), by = experiment][, threshold := thresh]
+}))
+
+dcast(results, experiment ~ threshold, value.var = "count")
+```
+
+```{r, fig.width=12, fig.height=4}
+results <- do.call(rbind, lapply(thresholds, function(t) {
+  df %>% 
+  group_by(experiment) %>% 
+  mutate(budget, experiment, num_found=cumsum(y<t), threshold=t)
+}))
+
+method_names <- c(
+  "3params_acrn" = "aCRN",      
+  "3params_fhet"  = "fHet",
+  "4params_acrn"  = "aCRN4"
+)
+
+results$Method <- method_names[results$experiment]
+results$threshold_label <- paste("Obj. <", results$threshold)
+
+ggplot(results) + 
+  geom_line(aes(x=budget, y=num_found, color=Method), size=1) + 
+  facet_wrap(~threshold_label, ncol=length(thresholds)) +
+  labs(
+    x = "Budget",
+    y = "Trajectories found",
+    fill = "Method",
+    color = "Method"
+  ) +
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12)
+  ) 
+```
+
+
+
+Look at trajectories: (this should work on the server):
+```{r}
+counts_files <- df[(y <= 20), counts_file] # for better comparison keep same budget
+sim_dff <- rbindlist(lapply(counts_files, load_trajectory))
+
+sim_dff <- df[,.(experiment, counts_file, instance, y, traj_rank)][sim_dff, on='counts_file']
+```
+
+
+```{r}
+long_sim_dff <- melt(
+  sim_dff[date >= min(gt_df$date) & date <= max(gt_df$date)],
+  measure.vars = c("deaths", "hosp"),
+  variable.name = "type",
+  value.name = "val"
+)
+
+ggplot(long_sim_dff[y<=20,]) +
+  geom_line(aes(x=date, y=val, group=instance, color=experiment), alpha=.75) +
+  geom_line(data=gt_df, aes(x=date, y=val), color='black', size=1) +
+  facet_wrap(experiment~type) +
+  theme_minimal()
+```
+
+Look at parameters:
+```{r}
+t = 30
+df_good = df[(iter==1)|(y<t)]
+df_good$Method <- method_names[df_good$experiment]
+cols <- character(nrow(df_good))
+types <- c(rep(1, nrow(df_good)))
+cols[] <- "tomato"
+cols[(df_good$iter == 1)&(df_good$Method=='aCRN')] <- "grey"
+cols[(df_good$iter == 1)&(df_good$Method=='fHet')] <- "grey"
+cols[(df_good$y<t)&(df_good$Method=='fHet')] <- "cornflowerblue"
+  
+types[(df_good$y<t)] <- 19
+
+param_cols <- c("susceptible.to.exposed.probability", "stay.at.home.probability", "stoe.behavioral.adjustment.probability", "seed")
+
+pairs(df_good[, ..param_cols], col=cols, pch=types)
+```
+

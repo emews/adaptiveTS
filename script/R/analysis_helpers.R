@@ -74,7 +74,7 @@ load_outputs_rdata <- function(experiment_id, exp_path, config){
               adaptive_crn=res_adaptive_CRNGP, 
               fixed_het=res_fixed_hetGP, 
               adaptive_het=res_adaptive_hetGP,
-              adaptive_crn_seed=res_adaptive_CRNGP_seed,
+              fixed_crn_seed=res_adaptive_CRNGP_seed,
               config=config[exp_id==experiment_id,]))
 }
 

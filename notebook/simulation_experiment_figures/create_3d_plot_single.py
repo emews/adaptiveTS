@@ -224,7 +224,7 @@ def plot_single_3d(
         ),
         annotations=[
             dict(
-                text=method,
+                text="",
                 x=0.5,
                 y=0.85,
                 xref="paper",
@@ -240,7 +240,7 @@ def plot_single_3d(
 
     if outfile:
         try:
-            fig.write_image(outfile)
+            fig.write_image(outfile, scale = 2)
         except Exception as e:
             # Writing images requires 'kaleido' to be installed
             print(f"Warning: write_image failed: {e}. Install 'kaleido' to enable image export.")

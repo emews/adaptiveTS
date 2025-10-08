@@ -31,12 +31,13 @@ theme_3 <- theme(
 ## ============================================================
 ## Experiment meta data and true trajectory
 
-beta_true  <- 0.7
-gamma_true <- 0.2
+beta_true  <- 0.3
+gamma_true <- 0.8
 seed_true <- 50
 
 # exp_path  <- "../../emews/experiments/all_methods_sweep/results"
-exp_path <- "../../emews/experiments/exp_gt_beta0.7_gamma0.2_seed50/results/"
+# exp_path <- "../../emews/experiments/exp_gt_beta0.7_gamma0.2_seed50/results/"
+exp_path <- "../../emews/experiments/exp_gt_beta0.3_gamma0.8_seed50/results/"
 plot_path <- paste0("../../plots/experiments/exp_gt_beta", beta_true, "_gamma", gamma_true, "_seed50/")
 config <- fread("../../emews/data/upfs/config_dedup.csv")
 config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
@@ -92,7 +93,8 @@ all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
 ## Plot trajectories colored by RMSE bins for aCRNGP method
 ## ============================================================
 
-out_list <- all_out_lists[[10]]
+# out_list <- all_out_lists[[10]]  # for beta=0.45, gamma=0.35, seed=50, exp_id=10
+out_list <- all_out_lists[[230]]  # for beta=0.7, gamma=0.2, seed=50, exp_id=10
 out <- out_list$adaptive_crn
 yobs <- ytrue_sim$n_SI
 

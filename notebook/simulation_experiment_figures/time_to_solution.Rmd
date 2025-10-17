@@ -23,13 +23,13 @@ source("../../script/R/analysis_helpers.R")
 ```
 
 ```{r}
-exp_path  <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/all_methods_sweep/all_methods_sweep/results"
-config <- fread("~/argonne/projects/data_assimilation/adaptiveTS/emews/data/upfs/config_dedup.csv")
+exp_path  <- "~/work/projects/git/adaptiveTS/emews/experiments/exp_gt_beta0.3_gamma0.8_seed50/results/"
+config <- fread("~/work/projects/git/adaptiveTS/emews/data/upfs/config_gt_beta0.3_gamma0.8_seed50.csv")
 config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
 
 #all_out_lists <- lapply(1:max(config$exp_id), load5outputs, exp_path=exp_path, config=config)
 #saveRDS(all_out_lists, file = paste0(exp_path, "combined_out_lists.rds"))
-all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
+# all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
 
 method_names <- c(
   "fixed_crn" = "fCRN",      
@@ -82,6 +82,7 @@ df_budget_agg <- merge(df_budget, config) %>%
   summarise(trajectories_found=mean(trajectories_found))
 
 df_budget_agg <- merge(df_budget_agg, hyper_designs %>% filter(sim_budget==700))
+
 ```
 ```{r}
 df_budget_agg

@@ -15,7 +15,7 @@ source("adaptive_TS_nonCRN.R")
 source("plots.R")
 source("analysis_helper_abby.R")
 
-doSave <- TRUE
+doSave <- F
 
 ## ggthemes for 3 panel plots
 theme_3 <- theme(
@@ -31,13 +31,13 @@ theme_3 <- theme(
 ## ============================================================
 ## Experiment meta data and true trajectory
 
-beta_true  <- 0.3
-gamma_true <- 0.8
+beta_true  <- 0.45
+gamma_true <- 0.35
 seed_true <- 50
 
-# exp_path  <- "../../emews/experiments/all_methods_sweep/results"
+exp_path  <- "../../emews/experiments/all_methods_sweep/results"
 # exp_path <- "../../emews/experiments/exp_gt_beta0.7_gamma0.2_seed50/results/"
-exp_path <- "../../emews/experiments/exp_gt_beta0.3_gamma0.8_seed50/results/"
+# exp_path <- "../../emews/experiments/exp_gt_beta0.3_gamma0.8_seed50/results/"
 plot_path <- paste0("../../plots/experiments/exp_gt_beta", beta_true, "_gamma", gamma_true, "_seed50/")
 config <- fread("../../emews/data/upfs/config_dedup.csv")
 config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
@@ -450,12 +450,18 @@ if(doSave){
 
 t<-15
 exp_ids <- c(90,110) # 310,35, exp_id
-label_data = df_auc %>% filter(method == "aCRN", threshold==t, exp_id %in% exp_ids)
+exp_ids <- c(210, 93)
+# label_data = df_auc %>% filter(method == "aCRN", threshold==t, exp_id %in% exp_ids)
+label_data = df_auc %>% filter(method %in% c("aCRN", "fHet"), threshold==t, exp_id %in% exp_ids)
 label_data$time = 700
-label_data$text_pos = c(225, 250)
+label_data = label_data[2:3,]
+label_data$text_pos = c(200, 225)
 
-plot_data <- df_budget %>%
-  filter(exp_id %in% exp_ids, threshold==15, method == "aCRN")
+plot_data_1 <- df_budget %>%
+  filter(exp_id %in% exp_ids[1], threshold==t, method %in% "fHet")
+plot_data_2 <- df_budget %>%
+  filter(exp_id %in% exp_ids[2], threshold==t, method %in% "aCRN")
+plot_data <- rbind(plot_data_1, plot_data_2)
 plot_data$method <- factor(plot_data$method, levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
 
 
@@ -481,8 +487,8 @@ fig <- ggplot(plot_data) +
   ) +
   scale_color_manual(
     name = "Experiment",
-    values = c("90" = "salmon", "110" = "cyan3"),  # Keep original colors
-    labels = c("90" = "Configuration 1", "110" = "Configuration 2")
+    values = c("210" = "salmon", "93" = "cyan3"),  # Keep original colors
+    labels = c("210" = "Configuration 1", "93" = "Configuration 2")
   ) +
  theme(
     legend.position = c(0.15, 0.95),

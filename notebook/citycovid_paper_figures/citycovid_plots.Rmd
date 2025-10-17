@@ -61,7 +61,7 @@ experiment_tracker
 
 Just compare the 3 parameter versions for now:
 ```{r}
-df <- rbindlist(lapply(2:3, function(i){
+df <- rbindlist(lapply(1:2, function(i){
     #exp_design <- readRDS(experiment_tracker$out_file[i])$exp_design
     data <- combine_results(experiment_tracker$out_file[i],
                       experiment_tracker$experiment[i],
@@ -99,7 +99,7 @@ ggplot(df) +
 
 
 ```{r}
-thresholds <- c(12, 15, 20)
+thresholds <- c(10, 15, 20, 30)
 
 results <- rbindlist(lapply(thresholds, function(thresh) {
   df[y < thresh, .(count = .N), by = experiment][, threshold := thresh]
@@ -117,8 +117,8 @@ results <- do.call(rbind, lapply(thresholds, function(t) {
 
 method_names <- c(
   "3params_acrn" = "aCRN",      
-  "3params_fhet"  = "fHet",
-  "4params_acrn"  = "aCRN4"
+  "3params_fhet"  = "fHet"
+  # "4params_acrn"  = "aCRN4"
 )
 
 results$Method <- method_names[results$experiment]

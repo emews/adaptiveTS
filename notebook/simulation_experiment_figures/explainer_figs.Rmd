@@ -1,0 +1,207 @@
+---
+title: "explainer_figs"
+output: html_document
+---
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyr)
+library(dplyr)
+library(plotly)
+library(patchwork)
+library(ggExtra)
+library(cowplot)
+
+source("../../script/R/analysis_helpers.R")
+```
+
+
+Ground truth trajectory:
+
+```{r}
+exp_path  <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/all_methods_sweep/all_methods_sweep/results"
+config <- fread("~/argonne/projects/data_assimilation/adaptiveTS/emews/data/upfs/config_dedup.csv")
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+
+# Get true trajectory 
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue_sim <- run_sim(c(xtrue, strue))
+ytrue <-  ytrue_sim$n_SI
+
+sim_seeds <- 1:50
+ytrue_sims <- list()
+ytrues <- list()
+i <- 1
+for (s in sim_seeds){
+  sim <- run_sim(c(xtrue, s))
+  sim$seed <- s
+  ytrue_sims[[i]] <- sim
+  ytrues[[i]] <- sim$n_SI
+  i <- i + 1
+}
+
+gt_sims <- do.call(rbind, ytrue_sims)
+gt_sims$seed <- as.factor(gt_sims$seed)
+
+# First, compute the mean_SI by step
+gt_summary <- gt_sims %>%
+  group_by(step) %>%
+  summarise(mean_SI = mean(n_SI), .groups = "drop")
+
+# Merge the summary back into gt_sims by 'step'
+gt_agg <- merge(gt_sims, gt_summary, by = "step")
+
+
+ggplot(gt_sims) + 
+  geom_line(aes(x=step, y=n_SI, group=seed), color='grey', size=.4) + 
+  geom_line(data=gt_sims %>% filter(seed == par_true[3]), aes(x=step, y=n_SI, group=seed), color='forestgreen', size=1) +
+  #geom_line(data=gt_sims %>% filter(seed %in% unique(config$sim_seed)), aes(x=step, y=n_SI, color=seed), size=1)+
+  geom_line(data=gt_sims %>% group_by(step) %>% summarise(n_SI = mean(n_SI)), aes(x=step, y=n_SI), color='black', size=.75) +
+  xlab('Time') + 
+  ylab('New Infections') +
+  theme_minimal()
+```
+
+
+Thresholds:
+```{r}
+#all_out_lists <- lapply(1:max(config$exp_id), load5outputs, exp_path=exp_path, config=config)
+#saveRDS(all_out_lists, file = paste0(exp_path, "combined_out_lists.rds"))
+all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
+
+method_names <- c(
+  "fixed_crn" = "fCRN",      
+  "adaptive_crn"  = "aCRN",
+  "fixed_het"      = "fHet",
+  "adaptive_het"   = "aHet",
+  "fixed_crn_seed" = "fgCRN"
+)
+
+```
+
+
+```{r}
+out_list <- all_out_lists[[31]]
+out <- out_list$adaptive_crn
+yobs <- ytrue_sim$n_SI
+
+df_true <- data.frame(time= (1:length(yobs)) - 1, yobs = yobs)
+df_traj <- as.data.frame(t(out$simout_mat))
+colnames(df_traj) <- 1:ncol(df_traj)
+df_traj$y_rmse <- out$y_rmse
+df_traj$traj <- 1:nrow(df_traj)
+
+#df_traj$time <- (1:nrow(df_traj)) - 1
+df_traj <- pivot_longer(df_traj, 
+               cols = -c(y_rmse, traj), 
+               names_to = "time", 
+               values_to = "new_infections")
+df_traj$time <- as.numeric(df_traj$time)
+
+label_rmse_bin <- function(y_vals, thresholds) {
+  # Make sure thresholds is sorted ascending
+  thresholds <- sort(thresholds)
+  
+  # For each y, pick the first t in thresholds such that y < t.
+  # If none exist, assign "RMSE >= max(thresholds)".
+  
+  sapply(y_vals, function(y) {
+    larger <- thresholds[y < thresholds]
+    if (length(larger) > 0) {
+      paste0("RMSE < ", larger[1])
+    } else {
+      paste0("RMSE >= ", thresholds[length(thresholds)])
+    }
+  })
+}
+
+```
+
+
+```{r}
+
+thresholds <- c(15, 20, 25, 30)
+df_traj$threshold <- label_rmse_bin(df_traj$y_rmse, thresholds)
+
+my_colors <- setNames(
+  c("#009E73", "#F0E442", "#56B4E9", "#D55E00"),
+  c(
+    paste0("RMSE < ", thresholds[1]),
+    paste0("RMSE < ", thresholds[2]),
+    paste0("RMSE < ", thresholds[3]),
+    paste0("RMSE < ", thresholds[4])
+  )
+)
+
+ggplot() +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0('RMSE >= ', thresholds[4])), 
+    aes(x = time, 
+        y = new_infections, 
+        group = traj
+    ),
+    alpha = 0.5,
+    color='grey'
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0('RMSE < ', thresholds[4])), 
+    aes(x = time, 
+        y = new_infections, 
+        group = traj, 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0('RMSE < ', thresholds[3])), 
+    aes(x = time, 
+        y = new_infections, 
+        group = traj, 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0('RMSE < ', thresholds[2])), 
+    aes(x = time, 
+        y = new_infections, 
+        group = traj, 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+   ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0('RMSE < ', thresholds[1])), 
+    aes(x = time, 
+        y = new_infections, 
+        group = traj, 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data    = df_true, 
+    mapping = aes(x = time, y = yobs),
+    color = "black", 
+    linewidth = 1
+  ) +
+  scale_color_manual(
+    name   = "Threshold", 
+    values = my_colors
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Time",
+    y = "New infections"
+  ) +
+  theme(
+    legend.position = "inside",
+    legend.position.inside = c(0.8, 0.8),
+    legend.background = element_blank()
+  )
+```
+

@@ -1,0 +1,4 @@
+experiment,out_file,summary_file
+4params_acrn,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/results/4params_acrn.RData,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/experiments/4params_acrn/summary.csv
+3params_acrn,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/results/3params_acrn.Rdata,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/experiments/3params_acrn/summary.csv
+3params_fhet,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/results/3params_fhet.RData,/Users/abbystevens/argonne/projects/data_assimilation/adaptiveTS/experiments/citycovid_results/experiments/3params_fhet/summary.csv

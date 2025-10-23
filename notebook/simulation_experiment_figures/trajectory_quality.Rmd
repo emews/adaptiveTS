@@ -1,0 +1,259 @@
+---
+title: "threshold_collections"
+output: html_document
+---
+
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyr)
+library(dplyr)
+library(plotly)
+library(patchwork)
+library(ggExtra)
+library(cowplot)
+
+source("../../script/R/analysis_helpers.R")
+```
+
+```{r}
+exp_path  <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/all_methods_sweep/all_methods_sweep/results"
+config <- fread("~/argonne/projects/data_assimilation/adaptiveTS/emews/data/upfs/config_dedup.csv")
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+
+#all_out_lists <- lapply(1:max(config$exp_id), load5outputs, exp_path=exp_path, config=config)
+#saveRDS(all_out_lists, file = paste0(exp_path, "combined_out_lists.rds"))
+all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
+
+method_names <- c(
+  "fixed_crn" = "fCRN",      
+  "adaptive_crn"  = "aCRN",
+  "fixed_het"      = "fHet",
+  "adaptive_het"   = "aHet",
+  "fixed_crn_seed" = "fgCRN"
+)
+```
+
+
+Compute the number of trajectories below threshold across experiments:
+```{r}
+threshold_counts <- function(out_list, sim_budget=200, nout=5, thresholds=c(15, 20, 25, 30)) {
+  outs <- names(out_list)[1:nout]
+  all_results <- list()
+  k = 1
+  for (i in seq_along(outs)) {
+    out_name <- outs[i]
+    out <- out_list[[out_name]]
+    for (j in seq_along(thresholds)) {
+      t <- thresholds[j]
+      cnt <- sum(out$y_rmse[1:sim_budget]<t)
+      res <- list(method=out_name, threshold=t, num_trajectories=cnt)
+      res <- cbind(data.frame(res), out_list$config)
+      res$sim_budget <- sim_budget # overwrite
+      all_results[[k]] <- res
+      k = k+1
+    }
+  }
+  return(do.call(rbind, all_results))
+}
+
+df_threshold <- do.call(
+  rbind,
+  lapply(c(300, 500, 700), function(b) {
+    do.call(
+      rbind,
+      lapply(all_out_lists, function(x) {
+        threshold_counts(x, sim_budget = b)
+      })
+    )
+  })
+)
+
+df_threshold <- merge(df_threshold, config[,sim_budget:=NULL])
+df_threshold$method <- factor(method_names[df_threshold$method], levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
+```
+
+
+Track individual hyperparameter combinations for plotting:
+```{r}
+hyper_designs <- df_threshold %>% 
+  select(sim_budget, init_npar, nrep, grid_npar, nTS_samp) %>%
+  distinct() %>%
+  mutate(
+    exp_design = row_number(),
+    initial_sims = init_npar * nrep,
+    sampling_size = grid_npar * nTS_samp)
+
+hyper_designs
+```
+
+
+Overall figure for trajectories found (across experiments):
+```{r, fig.width=6, fig.height=2}
+# Suppose your data.frame is called df with columns: 
+#   budget (200/500/700), 
+#   threshold (15/20/25/30), 
+#   method (adaptive_crn, …), 
+#   prop_under (numeric proportion from each run)
+
+# First compute summary stats:
+df_threshold$pct_traj <- df_threshold$num_trajectories/df_threshold$sim_budget
+
+# Aggregate over designs 
+df_summary <- merge(df_threshold, hyper_designs) %>%
+  group_by(sim_budget, threshold, method, exp_design) %>%
+  summarise(pct_traj=mean(pct_traj)) %>%
+  group_by(sim_budget, threshold, method) %>%
+  summarize(
+    median_prop = median(pct_traj),
+    iqr_lower   = quantile(pct_traj, 0.25),
+    iqr_upper   = quantile(pct_traj, 0.75),
+    mean_prop = mean(pct_traj),
+    se_lower = mean(pct_traj) - sd(pct_traj)/sqrt(n()),
+    se_upper = mean(pct_traj) + sd(pct_traj)/sqrt(n())
+  )
+df_summary
+```
+```{r}
+# Then plot
+p <- ggplot(df_summary, aes(x = threshold, y = median_prop, color = method)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_ribbon(aes(ymin = iqr_lower, ymax = iqr_upper, fill = method),
+              alpha = 0.2, color = NA) +
+  facet_wrap(~ sim_budget, ncol = 3) +
+  scale_x_continuous(breaks = c(15, 20, 25, 30)) +
+  labs(
+    x = "Threshold (RMSE)",
+    y = "Median Proportion of Budget Under Threshold",
+    color = "Method",
+    fill = "Method"
+  ) +
+  theme_minimal()
+
+p
+```
+
+
+```{r, fig.width=6, fig.height=2}
+df_summary$sim_budget_lab <- paste0("N[max]==", df_summary$sim_budget)
+df_summary$init_cost_lab <- paste0("N[0]==", df_summary$initial_sims)
+
+p <- ggplot(df_summary, aes(x = threshold, y = mean_prop, color = method)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  # geom_ribbon(aes(ymin = se_lower, ymax = se_upper, fill = method),
+  #             alpha = 0.2, color = NA) +
+  facet_wrap(~sim_budget_lab, ncol = 3, labeller = label_parsed) +
+  scale_x_continuous(breaks = c(15, 20, 25, 30)) +
+  labs(
+    x = "Threshold (RMSE)",
+    y = "Proportion under threshold",
+    color = "Method",
+    fill = "Method"
+  ) +
+  theme_minimal() +
+theme(
+    strip.text = element_text(size = 14, face = "bold"),         # Facet title
+    axis.title = element_text(size = 14),                        # Axis titles
+    axis.text = element_text(size = 12),                         # Axis tick labels
+    legend.title = element_text(size = 13),                      # Legend title
+    legend.text = element_text(size = 12)                        # Legend labels
+  )
+
+p
+```
+
+
+```{r, fig.width=12, fig.height=4}
+
+ggplot(df_pairs) + 
+  geom_boxplot(aes(x=method, y=pct_traj, fill=factor(initial_sims), color=factor(initial_sims))) +
+  facet_wrap(~sim_budget)+
+  theme_minimal()
+```
+
+
+```{r, fig.width=12, fig.height=4}
+
+df_pairs <- df_threshold %>% filter(threshold == 30)
+df_pairs <- merge(df_pairs, hyper_designs)
+
+# Create parsed labels as character strings (to be parsed later)
+df_pairs$sim_budget_lab <- paste0("N[max]==", df_pairs$sim_budget)
+df_pairs$init_cost_lab  <- paste0("N[0]==", df_pairs$initial_sims)
+
+df_pairs$pct_traj <- df_pairs$num_trajectories / df_pairs$sim_budget
+
+p <- ggplot(df_pairs) + 
+  geom_boxplot(aes(x = method, y = pct_traj, fill = factor(initial_sims), color = factor(initial_sims))) +
+  facet_wrap(~sim_budget_lab, labeller = label_parsed) +
+  labs(
+    x = "Method",
+    y = "Proportion under threshold",
+    fill = expression(N[0]),
+    color = expression(N[0])
+  ) +
+  theme_minimal() + 
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12)
+  ) +
+  scale_fill_manual(
+    values = c("50" = "#132B43", "100" = "#306490", "200" = "#56B1F7")
+  ) +
+  scale_color_manual(
+    values = c("50" = "#132B43", "100" = "#306490", "200" = "#56B1F7")
+  )
+
+ggsave("initial_design.png", plot = p, width = 12, height = 4, dpi = 300)
+```
+
+
+```{r, fig.width=12, fig.height=4}
+df_pairs <- df_threshold %>% filter(threshold == 20)
+df_pairs <- merge(df_pairs, hyper_designs)
+
+df_pairs$pct_traj <- df_pairs$num_trajectories / df_pairs$sim_budget
+#df_pairs$sim_budget_lab <- paste0("N[max]==", df_pairs$sim_budget)
+
+# Use factors for both fill and facet variables
+df_pairs$initial_sims <- factor(df_pairs$initial_sims)
+df_pairs$sim_budget <- factor(df_pairs$sim_budget)
+
+# Final plot
+ggplot(df_pairs) + 
+  geom_boxplot(aes(x = method, y = pct_traj, fill = initial_sims)) +
+  facet_wrap(~sim_budget, labeller = label_bquote(cols = N[max] == .(sim_budget))) +
+  scale_fill_manual(
+    name = "Initial design",
+    values = c("50" = "darkgreen", "100" = "gold", "200" = "tomato"),
+    labels = c(expression(N[0] == 50), expression(N[0] == 100), expression(N[0] == 200))
+  ) +
+  theme_minimal() +
+  labs(x = "Method", y = "Proportion under threshold")
+
+```
+
+```{r}
+df_pairs <- df_threshold %>% filter(sim_budget==700, threshold==20)
+
+df_melt <- melt(df_pairs %>% select(method, num_trajectories, init_npar, nrep, grid_npar, nTS_samp), 
+               id.vars=c('method', 'num_trajectories'), 
+               variable.name='experimental_unit', 
+               value.name = 'value')
+
+p <- ggplot(df_melt) + 
+  geom_boxplot(aes(x=factor(value), y=num_trajectories, color=method, fill=method))+
+  facet_wrap(~experimental_unit, scales='free_x', ncol=4) +
+  theme_minimal()
+```

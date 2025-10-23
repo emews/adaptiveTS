@@ -1,0 +1,207 @@
+---
+title: "explainer_figs"
+output: html_document
+---
+
+```{r}
+library(data.table)
+library(jsonlite)
+source("../../emews/R/adaptiveTS_citycovid.R")
+source("analysis_helpers.R")
+
+exp_dir <- "../../experiments/top50x30_mod_1.0_results/"
+gt_h_file = '../../emews/data/calibration_targets/dt.chicago.hosp.csv'
+gt_d_file = '../../emews/data/calibration_targets/dt.chicago.deaths.csv'
+```
+
+
+Load ground truth:
+```{r}
+gt_dfs <- process_gt(gt_h_file, gt_d_file)
+gt_d_df <- gt_dfs$deaths
+gt_h_df <- gt_dfs$hosp %>% rename(hosp=tot.hosp)
+
+gt_df <- merge(gt_d_df, gt_h_df, by='date') %>% 
+  pivot_longer(cols=c(deaths, hosp), names_to='type', values_to='val')
+```
+
+
+Load parameters from UPF:
+```{r}
+load_params <- function(instances, exp_dir){
+  params_list <- lapply(instances, function(i) {
+  folder <- sprintf("instance_%d", i)
+  file <- file.path(paste0(exp_dir, folder), sprintf("parameters_r0_%d.txt", i))
+  lines <- fread(file, sep = "=", header = FALSE, fill = TRUE, strip.white = TRUE)
+  
+  # clean col names
+  setnames(lines, c("key", "value"))
+  cmd_line <- lines[key == "command.line", value]
+  
+  if (length(cmd_line) == 0) return(NULL)  # skip if missing
+  
+  # parse JSON from the command.line string
+  parsed <- fromJSON(cmd_line)
+  as.data.table(parsed)[, instance := i]
+    }
+  )
+  params <- rbindlist(params_list, fill = TRUE)
+  return(params)
+}
+
+params <- load_params(0:49, exp_dir)
+
+pairs(params[, .(susceptible.to.exposed.probability, stay.at.home.probability, stoe.behavioral.adjustment.probability)])
+```
+
+
+```{r}
+get_filepaths <- function(instances = 0:49, replicates = 0:29, base_dir = ".") {
+  counts_list <- lapply(instances, function(i) {
+    lapply(replicates, function(j) {
+      file_path <- file.path(base_dir, sprintf("instance_%d/output/counts_r%d_%d.csv", i, j, i))
+      data.table(instance = i, replicate = j, filepath = file_path)
+    })
+  })
+  
+  rbindlist(unlist(counts_list, recursive = FALSE), use.names = TRUE, fill = TRUE)
+}
+
+upf_df <- get_filepaths(base_dir=exp_dir)
+upf_df$y <- obj_citycovid(upf_df$filepath, 'both', gt_h_file, gt_d_file)
+
+upf_df <- upf_df[order(y), traj_rank := 1:.N]
+head(upf_df)
+```
+Look some trajectories:
+```{r}
+setnames(upf_df, "filepath", "counts_file", skip_absent = TRUE)
+#counts_files <- upf_df[y <= 30, counts_file] 
+counts_files <- upf_df[,counts_file]
+sim_df <- rbindlist(lapply(counts_files, load_trajectory))
+
+sim_df <- upf_df[,.(counts_file, instance, replicate, y, traj_rank)][sim_df, on='counts_file']
+
+long_sim_df <- melt(
+  sim_df[date >= min(gt_df$date) & date <= max(gt_df$date)],
+  measure.vars = c("deaths", "hosp"),
+  variable.name = "type",
+  value.name = "val"
+)
+```
+
+```{r}
+label_threshold<- function(y_vals, thresholds, label_prefix='RMSE') {
+  # Make sure thresholds is sorted ascending
+  thresholds <- sort(thresholds)
+  
+  # For each y, pick the first t in thresholds such that y < t.
+  # If none exist, assign "RMSE >= max(thresholds)".
+  
+  sapply(y_vals, function(y) {
+    larger <- thresholds[y < thresholds]
+    if (length(larger) > 0) {
+      paste0(label_prefix, " < ", larger[1])
+    } else {
+      paste0(label_prefix, " >= ", thresholds[length(thresholds)])
+    }
+  })
+}
+
+```
+
+
+```{r}
+thresholds <- c(10, 15, 20, 30)
+label_prefix = ""
+long_sim_df$threshold <- label_threshold(long_sim_df$y, thresholds, label_prefix=label_prefix)
+df_traj = long_sim_df
+
+my_colors <- setNames(
+  c("#009E73", "#F0E442", "#56B4E9", "#D55E00"),
+  c(
+    paste0(label_prefix, " < ", thresholds[1]),
+    paste0(label_prefix, " < ",  thresholds[2]),
+    paste0(label_prefix, " < ", thresholds[3]),
+    paste0(label_prefix, " < ",  thresholds[4])
+  )
+)
+
+```
+
+```{r, fig.width=12, fig.height=4}
+ggplot() +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0(label_prefix, ' >= ', thresholds[4])), 
+    aes(x = date, 
+        y = val, 
+        group=interaction(instance, replicate)
+    ),
+    alpha = 0.5,
+    color='grey'
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0(label_prefix, ' < ', thresholds[4])), 
+    aes(x = date, 
+        y = val, 
+        group = interaction(instance, replicate), 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0(label_prefix, ' < ', thresholds[3])), 
+    aes(x = date, 
+        y = val, 
+        group = interaction(instance, replicate), 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0(label_prefix, ' < ', thresholds[2])), 
+    aes(x = date, 
+        y = val, 
+        group = interaction(instance, replicate), 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+   ) +
+  geom_line(
+    data = df_traj %>% filter(threshold == paste0(label_prefix, ' < ', thresholds[1])), 
+    aes(x = date, 
+        y = val, 
+        group = interaction(instance, replicate), 
+        color = factor(threshold)   # ensure it's treated as discrete
+    ),
+  ) +
+  geom_line(
+    data    = gt_df, 
+    mapping = aes(x = date, y = val),
+    color = "black", 
+    linewidth = 1
+  ) +
+  scale_color_manual(
+    name   = "Threshold", 
+    values = my_colors
+  ) +
+  facet_wrap(~type, 
+              labeller = labeller(type = c("deaths" = "Deaths", "hosp" = "Hospitalizations"))
+  ) +
+ scale_x_date(
+   date_labels = "%b %Y",        # Format: e.g., "Jun 2025"
+   date_breaks = "1 months",    # Show tick every 3 months
+   expand = expansion(add = c(1, 5))
+  ) +
+  theme_minimal() +
+  labs(
+    x = "Date",
+    y = "Count"
+  ) + 
+  theme(
+  strip.text = element_text(size = 14, face = "bold"),
+  axis.title = element_text(size = 14),
+  axis.text = element_text(size = 12),
+  legend.title = element_text(size = 13),
+  legend.text = element_text(size = 12),
+  axis.text.x = element_text(angle = 30, hjust = 1)
+)
+
+```

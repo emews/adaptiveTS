@@ -1,0 +1,322 @@
+---
+title: "3d_plots"
+output: html_document
+---
+
+```{r}
+#library(hetGP, lib.loc = "/lcrc/project/EMEWS/bebop/R-packages/")
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+library(tidyr)
+library(dplyr)
+library(plotly)
+library(patchwork)
+library(ggExtra)
+library(cowplot)
+
+source("../../script/R/analysis_helpers.R")
+```
+
+```{r}
+exp_path  <- "~/argonne/projects/data_assimilation/adaptiveTS/experiments/all_methods_sweep/all_methods_sweep/results"
+config <- fread("~/argonne/projects/data_assimilation/adaptiveTS/emews/data/upfs/config_dedup.csv")
+config[, exp_id := as.numeric(gsub("exp_", "", exp_id))]
+all_out_lists <- readRDS(paste0(exp_path, "combined_out_lists.rds"))
+```
+
+```{r}
+config %>% filter(init_npar==10, nrep==20, sim_budget==700, grid_npar==100, nTS_samp==10)
+```
+
+IDEA 1: combined plot
+```{r}
+method_names <- c(
+  "fixed_crn" = "fCRN",      
+  "adaptive_crn"  = "aCRN",
+  "fixed_het"      = "fHet",
+  "adaptive_het"   = "aHet",
+  "fixed_crn_seed" = "fgCRN"
+)
+
+
+dfx <- search_space(all_out_lists[[31]], nout=5)
+dfx$method <- factor(method_names[dfx$method], levels=c("aCRN", "fHet", "aHet", "fgCRN", "fCRN"))
+
+ggplot_colors_5 <- c("#F8766D", "#A3A500", "#00BF7D", "#00B0F6", "#E76BF3")
+
+fig <- plot_ly(
+  dfx %>% filter(iter>1, time<=300),
+  x = ~rep,
+  y = ~p1,
+  z = ~p2,
+  color = ~method,
+  colors = ggplot_colors_5,
+  type = "scatter3d",
+  mode = "markers",
+  marker = list(size = 3)
+) %>%
+  layout(
+    scene = list(
+      camera = list(
+          eye = list(x = 1.75, y = 2, z = 0.25)  # Set viewpoint vector
+        ),
+      xaxis = list(title = list(text = "Random seed"), range=c(1,1000), autorange = "reversed"),
+      yaxis = list(title = "Recovery Rate", range=c(0,1)),  # β (beta)
+      zaxis = list(title = "Infection Rate", range=c(0,1))   # γ (gamma)
+      #yaxis = list(title = "\u03B2", range=c(0,1)),  # β (beta)
+      #zaxis = list(title = "\u03B3", range=c(0,1))   # γ (gamma)
+    )
+  )
+
+fig
+```
+
+
+
+```{r}
+plot_ly(
+      data = dfx %>% filter(method==method_name, iter>1),
+      x = ~rep,
+      y = ~p1,
+      z = ~p2,
+      type = "scatter3d",
+      mode = "markers",
+      marker = list(size = 4, color="black")
+    ) %>%
+    layout(
+      title = list(
+        text = method_name,
+        y = 0.75,         # ← lower value moves it closer to plot
+        x = .6,          # center horizontally
+        xanchor = "center",
+        yanchor = "top",
+        font = list(size = 16)
+      ),
+      scene = list(
+        camera = list(
+          eye = list(x = 1.75, y = 2, z = 0.25)  # Set viewpoint vector
+        ),
+        xaxis = list(title = list(text = "Random seed"), range=c(1000,1)),
+        yaxis = list(title = "\u03B2", range=c(0,1)),  # β (beta)
+        zaxis = list(title = "\u03B3", range=c(0,1))   # γ (gamma)
+      )
+    )
+```
+
+```{r}
+dfx = dfx %>% mutate(
+  β = p1, 
+  γ = p2,
+  r = rep
+)
+
+dfx <- rbind(dfx, dfx %>% filter(method=="aCRN", iter==1) %>% mutate(method="Initial Design"))
+dfx$method <- factor(dfx$method, levels = c("aHet", "fHet", "Initial Design", "aCRN", "fCRN", "fgCRN"))
+
+library("lattice")
+cloud(β ~ r * γ | method, data = dfx)
+```
+
+
+```{r}
+library(htmlwidgets)
+library(webshot)
+
+# split your data by the faceting variable (e.g., method)
+
+for (method_name in method_names) {
+  fig <- plot_ly(
+      data = dfx %>% filter(method==method_name, iter>1),
+      x = ~rep,
+      y = ~p1,
+      z = ~p2,
+      type = "scatter3d",
+      mode = "markers",
+      marker = list(size = 4, color="black", alpha=.1)
+    ) %>%
+    layout(
+      title = list(
+        text = method_name,
+        y = 1.5,         # ← lower value moves it closer to plot
+        x = 0.5,          # center horizontally
+        xanchor = "center",
+        yanchor = "top",
+        font = list(size = 20)
+      ),
+      scene = list(
+        camera = list(
+          eye = list(x = 1, y = 1.5, z = .1)  # Set viewpoint vector
+        ),
+        xaxis = list(title = list(text = "Seed"), range=c(1000,1)),
+        #yaxis = list(title = "Recovery Rate", range=c(0,1)),  # β (beta)
+        #zaxis = list(title = "Infection Rate", range=c(0,1))   # γ (gamma)
+        yaxis = list(title = "\u03B2", range=c(0,1)),  # β (beta)
+        zaxis = list(title = "\u03B3", range=c(0,1))   # γ (gamma)
+      )
+    )
+  htmlwidgets::saveWidget(as_widget(fig), paste0(method_name, "_3D_bw.html"))
+}
+
+```
+
+
+```{r}
+fig <- plot_ly(
+    data = dfx %>% filter(method==method_name, iter==1),
+    x = ~rep,
+    y = ~p1,
+    z = ~p2,
+    type = "scatter3d",
+    mode = "markers",
+    marker = list(size = 4, color="black")
+  ) %>%
+  layout(
+      title = list(
+        text = "Initial Design",
+        y = 1.5,         # ← lower value moves it closer to plot
+        x = 0.5,          # center horizontally
+        xanchor = "center",
+        yanchor = "top",
+        font = list(size = 20)
+      ),
+      scene = list(
+        camera = list(
+          eye = list(x = 1, y = 1.5, z = .1)  # Set viewpoint vector
+        ),
+      xaxis = list(title = list(text = "Seed"), range=c(1000,1)),
+      #yaxis = list(title = "Recovery Rate", range=c(0,1)),  # β (beta)
+      #zaxis = list(title = "Infection Rate", range=c(0,1))   # γ (gamma)
+      yaxis = list(title = "\u03B2", range=c(0,1)),  # β (beta)
+      zaxis = list(title = "\u03B3", range=c(0,1))   # γ (gamma)
+    )
+  )
+htmlwidgets::saveWidget(as_widget(fig), paste0("Initial_3D_bw.html"))
+
+
+```
+
+```{r}
+method_name = 'aHet'
+
+x <- dfx %>% filter(method==method_name) %>% pull('p1')
+y <- dfx %>% filter(method==method_name) %>% pull('p2')
+s <- subplot(
+    plot_ly(x = x, color = I("black"), type = 'histogram'), 
+    plotly_empty(), 
+    plot_ly(x = x, y = y, type = 'histogram2dcontour', showscale = F), 
+    plot_ly(y = y, color = I("black"), type = 'histogram'),
+  nrows = 2, heights = c(0.2, 0.8), widths = c(0.8, 0.2), 
+  shareX = TRUE, shareY = TRUE, titleX = FALSE, titleY = FALSE
+)
+
+fig <- layout(s, showlegend = FALSE)
+
+fig
+```
+
+
+```{r}
+library(ggExtra)
+
+method_name = 'aHet'
+# Base ggplot: 2D density plot with filled contours
+plot_list <- list() 
+for (m in method_names){
+  p <- ggplot(dfx %>% filter(method==method_name) , aes(x = p1, y = p2)) +
+  geom_point(alpha = 0) +  # invisible points to satisfy ggMarginal
+  stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = "black") +
+  #geom_density_2d_filled() +
+  scale_fill_viridis_c(option = "plasma") +
+  title(m) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+  # Add marginal histograms
+  p <- ggMarginal(p, type = "histogram", fill = "grey20", color = "black")
+  plot_list[[length(plot_list)+1]] <- p
+}
+
+
+```
+
+
+```{r}
+ggplot(dfx, aes(x = p1, y = p2)) + 
+  geom_point(alpha = .1) +
+  stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = "black") +
+  scale_fill_viridis_c(option = "plasma") +
+  facet_wrap(~method) + 
+  theme_bw()
+```
+
+```{r}
+method_names <- c(
+  "fixed_crn" = "fCRN",      
+  "adaptive_crn"  = "aCRN",
+  "fixed_het"      = "fHet",
+  "adaptive_het"   = "aHet",
+  "fixed_crn_seed" = "fgCRN"
+)
+
+
+
+
+
+
+plot_list <- list()
+
+for (m in c("aCRN", "fgCRN", "fCRN", "aHet", "fHet")) {
+  p <- ggplot(dfx %>% filter(method == m, iter>1), aes(x = p1, y = p2)) +
+    geom_point(alpha = .1) +
+    stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = "black") +
+    scale_fill_viridis_c(option = "plasma") +
+    theme_bw() +
+    annotate(
+      "text",
+      x = Inf, y = -Inf,                # top-left corner
+      label = m,
+      hjust = 1.1, vjust = -0.5,        # adjust inward for padding
+      size = 4.5, fontface = "bold"
+    ) +
+    theme(legend.position = "none")
+
+
+  # Add marginal histograms
+  p_marginal <- ggMarginal(p, type = "histogram", fill = "grey20", color = "black")
+
+  # No need to convert — cowplot::plot_grid handles gtables
+  plot_list[[length(plot_list) + 1]] <- p_marginal
+}
+
+# add initial design for comparison
+p <- ggplot(dfx %>% filter(method=='aCRN', iter == 1), aes(x = p1, y = p2)) +
+    geom_point(alpha = .1) +
+    #stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = "black") +
+    #scale_fill_viridis_c(option = "plasma") +
+    theme_bw() +
+    annotate(
+      "text",
+      x = Inf, y = -Inf,                # top-left corner
+      label = "Initial Design",
+      hjust = 1.05, vjust = -0.5,        # adjust inward for padding
+      size = 4.5, fontface = "bold"
+    )+
+    theme(legend.position = "none")
+
+  # Add marginal histograms
+  p_marginal <- ggMarginal(p, type = "histogram", fill = "grey20", color = "black")
+
+  # No need to convert — cowplot::plot_grid handles gtables
+  plot_list[[length(plot_list) + 1]] <- p_marginal
+
+# Arrange in a grid
+plot_grid(plotlist = plot_list, ncol = 3)
+
+```
+
+
+

@@ -14,7 +14,7 @@ The code is designed to be used with the EMEWS (Extreme-scale Model Exploration 
 
 ## Paper
 
-(Link to be added later)
+arxiv: [https://arxiv.org/abs/2510.18099](https://arxiv.org/abs/2510.18099)
 
 ## Directory Structure
 

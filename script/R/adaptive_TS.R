@@ -76,6 +76,61 @@ loglik_design <- function(model, newX, ytrue, err_sig){
 #' @export
 #'
 #' @examples
+create_grid_flow_CRNGP <- function(nparam, nrep, model, ref, err_sig){
+  
+  p <- ncol(model$X0)  # input dimension
+  
+  # lhs design to initialize
+  s <- 1:nrep
+  Xgrid_01 <- lhs::randomLHS(n = nparam, k = p)
+  Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], rep(s, nparam))
+  
+  # calculate importance weights
+  w <- loglik_design(newX = Xsgrid_01, model = model, ytrue = ref, err_sig = err_sig)
+  w_prime <-  w - max(w)
+  w_norm <- exp(w_prime) / sum(exp(w_prime))
+  
+  # sample
+  grid_ids <- sample(1:nrow(Xsgrid_01), nrow(Xsgrid_01), prob = w_norm, replace = T)
+  grid_ids <- unique(grid_ids)
+  
+  # reticulate::source_python("flow_sampler.py")
+  
+  # Convert to data frame and normalize weights
+  grid_df <- as.data.frame(Xsgrid_01[grid_ids, ])
+  colnames(grid_df) <- c(paste0("x", 1:p), "r")
+  w_filtered <- w[grid_ids]
+  w_prime <- w_filtered - max(w_filtered)
+  w_norm <- exp(w_prime) / sum(exp(w_prime))
+  grid_df['weight'] <- w_norm
+  
+  # Call Python to sample
+  # samples_new <- flow_sample_from_weighted_grid(grid_df, w_norm, nparam * nrep)
+  
+  input_csv <- "filtered_samples.csv"
+  output_csv <- "generated_samples.csv"
+  
+  write.csv(grid_df, input_csv, row.names = FALSE)
+  
+  # cat("Filtering done", '\n')
+  
+  # Call the bash script
+  nsamples <- 1000
+  system(paste("bash run_flow.sh", input_csv, output_csv, nsamples))
+  
+  print(getwd())
+  # cat("Sampling done", '\n')
+  
+  # Load the generated samples
+  generated_df <- read.csv(output_csv)
+  
+  # samples_new is a matrix of shape (nparam * nrep, p + 1)
+  xsgrid_new <- as.matrix(generated_df)
+  
+  return(xsgrid_new)
+}
+
+
 create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3){
   
   p <- ncol(model$X0)  # input dimension
@@ -136,11 +191,8 @@ create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3)
     }
   }
   
-  return(list(xsgrid_new, xsgrid_all, xsgrid_id))
+  return(xsgrid_new)
 }
-
-
-
 
 parse_sim_arg <- function(parlist){
   
@@ -366,6 +418,7 @@ next_eval_CRN <- function(model,
                           ref = NULL,
                           err_sig = NULL,
                           prop_sig = NULL,
+                          use_flow = TRUE,
                           ...){
   
   if(adaptive){
@@ -375,7 +428,8 @@ next_eval_CRN <- function(model,
                            ref = ref,
                            err_sig = err_sig,
                            prop_sig = prop_sig,
-                           nTS_samp = nTS_samp, ...)
+                           nTS_samp = nTS_samp, 
+                           use_flow = use_flow, ...)
     
   } else {
     out <- fixed_CRN_TS(model = model,
@@ -443,18 +497,28 @@ adaptive_CRN_TS <- function(model,
                             ref,
                             err_sig,
                             prop_sig,
-                            nTS_samp){
+                            nTS_samp,
+                            use_flow = T){
   
   ## create grid
-  grid <- create_grid_CRNGP(grid_npar, 
-                            nrep, 
-                            model, 
-                            ref, 
-                            err_sig, 
-                            prop_sig)
-  Xsgrid <- grid[[1]]
-  Xsgrid_full <- grid[[2]]
-  Xsgrid_id <- grid[[3]]
+  if(use_flow){
+    grid <- create_grid_flow_CRNGP(grid_npar, 
+                                   nrep, 
+                                   model, 
+                                   ref, 
+                                   err_sig)
+  } else {
+    grid <- create_grid_CRNGP(grid_npar, 
+                              nrep, 
+                              model, 
+                              ref, 
+                              err_sig, 
+                              prop_sig)
+  }
+  Xsgrid <- grid
+  # Xsgrid <- grid[[1]]
+  # Xsgrid_full <- grid[[2]]
+  # Xsgrid_id <- grid[[3]]
   
   ## predict
   pred <- predict(model, Xsgrid, xprime = Xsgrid)

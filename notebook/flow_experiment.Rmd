@@ -1,0 +1,488 @@
+---
+title: "BO with NNflow adaptive grid"
+output: html_notebook
+---
+
+
+```{r}
+library(hetGP)
+library(scales)
+library(data.table)
+library(lhs)
+library(ggplot2)
+library(mvtnorm)
+# library(reticulate)
+
+# use_condaenv("uqpy", required = TRUE)
+# source_python("../python/flow_sampler.py")
+
+Sys.setenv(PATH = paste("home/fadikar/softwares/anaconda3/condabin", Sys.getenv("PATH"), sep = ":"))
+
+r_path <- "/home/fadikar/work/projects/git/adaptiveTS/script/R/"
+
+source(paste0(r_path, "/odin-sim.R"))
+source(paste0(r_path, "/adaptive_TS.R"))
+
+
+## user input
+init_npar <- 5
+nrep <- 20
+sim_budget <- 300
+grid_npar <- 100
+nTS_samp <- 10
+GP_type <- "CRNGP"
+err_sig <- 0.5
+prop_sig <- 0.3
+
+## Create ground truth
+par_true <- c(0.45, 0.35, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+
+sim_func <- run_sim_err
+p <- 2
+ref <- -2
+```
+
+
+## Using normalizing flow
+
+```{r}
+## =====================
+## initial design and simulations
+set.seed(1)
+X_01 <- lhs::randomLHS(n = init_npar, k = p)
+s <- 1:nrep
+Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
+
+simouts <- list() # store full simulations so we don't have to re-run later in the analysis
+y <- rep(NA, init_npar*nrep)
+for (ii in 1:(init_npar*nrep)){
+  simout <- sim_func(Xs_01[ii,])
+  y[ii] <- simout$out
+  simouts[[ii]] <- simout$res
+}
+
+## =====================
+## standardize output
+y_std <- scale(log(y))
+ycenter <- attr(y_std, "scaled:center")
+ysd <- attr(y_std, "scaled:scale")
+
+
+## =====================
+## BO set up 
+Xs <- Xs_01
+Y <- y_std
+f <- fitGP(Xs, Y, GP_type = GP_type, known = list(beta0 = 0))
+
+no_of_sims <- length(y)
+X_list <- list()
+y_list <- list()
+simout_list <- list()
+ynative_list <- list()
+
+X_list[[1]] <- Xs_01
+y_list[[1]] <- y_std
+simout_list[[1]] <- simouts
+ynative_list[[1]] <- y
+```
+
+```{r}
+# TS starts here
+tt <- 2
+while(no_of_sims < sim_budget){
+# for (tt in 1:nTS_iter){
+  
+  
+  grid <- create_grid_flow_CRNGP(grid_npar,
+                            nrep,
+                            model = f,
+                            ref,
+                            err_sig)
+  # Xsgrid <- grid
+  # Xsgrid <- grid[[1]]
+  # Xsgrid_full <- grid[[2]]
+  # Xsgrid_id <- grid[[3]]
+  
+  ## predict
+  # pred <- predict(model, Xsgrid, xprime = Xsgrid)
+  # tTS <- MASS::mvrnorm(n = nTS_samp, 
+  #                      mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  # 
+  # best_ids <- apply(tTS, 1, which.min)
+  # best_ids <- unique(best_ids)
+  out <- next_eval_CRN(model = f,
+                       grid_npar = grid_npar,
+                       nrep = nrep,
+                       ref = ref,
+                       err_sig = err_sig,
+                       prop_sig = prop_sig,
+                       nTS_samp = nTS_samp,
+                       adaptive = T)
+  
+  xnew <- out
+  if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
+  
+  ## evaluate new simulations 
+  ynew <- rep(NA, nrow(xnew))
+  simouts <- list()
+  for (ii in 1:nrow(xnew)){
+    simout <- sim_func(xnew[ii, ])
+    ynew[ii] <- simout$out
+    simouts[[ii]] <- simout$res
+  }
+  X_list[[tt]] <- xnew
+  y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+  ynative_list[[tt]] <- ynew
+  simout_list[[tt]] <- simouts
+  
+  ## update surrogate
+  Xs <- rbind(Xs, xnew)
+  Y <- c(Y, y_list[[tt]])
+  f <- fitGP(Xs, Y, GP_type = GP_type, 
+             known = list(beta0 = 0))
+  
+  no_of_sims <- no_of_sims + length(ynew)
+  
+  cat("iter = ", tt, "\n")
+  
+  tt <- tt + 1
+}
+```
+
+```{r}
+y_list_flow <- y_list
+y_all_flow <- unlist(y_list_flow, use.names = F)
+list_index <- rep(seq_along(y_list_flow), lengths(y_list))
+vector_index <- unlist(lapply(y_list_flow, seq_along))
+
+order_idx <- order(y_all_flow)
+
+# 3. Create a data frame with sorted information
+result_flow <- data.frame(
+  value = y_all_flow[order_idx],
+  list_pos = list_index[order_idx],   # which element of the list
+  vector_pos = vector_index[order_idx] # position within that vector
+)
+
+simout_list_flow <- simout_list
+X_list_flow <- X_list
+
+result_flow
+
+```
+
+```{r}
+nbest <- 100
+
+plot(0:100, ytrue_vec, ylim = c(0, 300))
+for (i in 1:nbest){
+  l <- result_flow[i, "list_pos"]
+  v <- result_flow[i, "vector_pos"]
+
+  lines(0:100, simout_list_flow[[l]][[v]]$n_SI, col = "grey", lty = 1)
+}
+points(0:100, ytrue_vec, pch = 19)
+```
+
+### Old algorithm
+
+```{r}
+## =====================
+set.seed(1)
+## initial design and simulations
+X_01 <- lhs::randomLHS(n = init_npar, k = p)
+s <- 1:nrep
+Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
+
+simouts <- list() # store full simulations so we don't have to re-run later in the analysis
+y <- rep(NA, init_npar*nrep)
+for (ii in 1:(init_npar*nrep)){
+  simout <- sim_func(Xs_01[ii,])
+  y[ii] <- simout$out
+  simouts[[ii]] <- simout$res
+}
+
+## =====================
+## standardize output
+y_std <- scale(log(y))
+ycenter <- attr(y_std, "scaled:center")
+ysd <- attr(y_std, "scaled:scale")
+
+
+## =====================
+## BO set up 
+Xs <- Xs_01
+Y <- y_std
+f <- fitGP(Xs, Y, GP_type = GP_type, known = list(beta0 = 0))
+
+no_of_sims <- length(y)
+X_list <- list()
+y_list <- list()
+simout_list <- list()
+ynative_list <- list()
+
+X_list[[1]] <- Xs_01
+y_list[[1]] <- y_std
+simout_list[[1]] <- simouts
+ynative_list[[1]] <- y
+```
+
+```{r}
+# TS starts here
+tt <- 2
+while(no_of_sims < sim_budget){
+# for (tt in 1:nTS_iter){
+  
+  
+  # grid <- create_grid_CRNGP(grid_npar, 
+  #                           nrep, 
+  #                           model = f, 
+  #                           ref, 
+  #                           err_sig, 
+  #                           prop_sig)
+  # Xsgrid <- grid
+  # Xsgrid <- grid[[1]]
+  # Xsgrid_full <- grid[[2]]
+  # Xsgrid_id <- grid[[3]]
+  
+  ## predict
+  # pred <- predict(model, Xsgrid, xprime = Xsgrid)
+  # tTS <- MASS::mvrnorm(n = nTS_samp, 
+  #                      mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
+  # 
+  # best_ids <- apply(tTS, 1, which.min)
+  # best_ids <- unique(best_ids)
+  out <- next_eval_CRN(model = f,
+                       grid_npar = grid_npar,
+                       nrep = nrep,
+                       ref = ref,
+                       err_sig = err_sig,
+                       prop_sig = prop_sig,
+                       nTS_samp = nTS_samp,
+                       adaptive = T,
+                       use_flow = F)
+  
+  xnew <- out
+  if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
+  
+  ## evaluate new simulations 
+  ynew <- rep(NA, nrow(xnew))
+  simouts <- list()
+  for (ii in 1:nrow(xnew)){
+    simout <- sim_func(xnew[ii, ])
+    ynew[ii] <- simout$out
+    simouts[[ii]] <- simout$res
+  }
+  X_list[[tt]] <- xnew
+  y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+  ynative_list[[tt]] <- ynew
+  simout_list[[tt]] <- simouts
+  
+  ## update surrogate
+  Xs <- rbind(Xs, xnew)
+  Y <- c(Y, y_list[[tt]])
+  f <- fitGP(Xs, Y, GP_type = GP_type, 
+             known = list(beta0 = 0))
+  
+  no_of_sims <- no_of_sims + length(ynew)
+  
+  cat("iter = ", tt, "\n")
+  
+  tt <- tt + 1
+}
+```
+
+```{r}
+y_list_mh <- y_list
+y_all_mh <- unlist(y_list_mh, use.names = F)
+list_index <- rep(seq_along(y_list_mh), lengths(y_list_mh))
+vector_index <- unlist(lapply(y_list_mh, seq_along))
+
+order_idx <- order(y_all_mh)
+
+# 3. Create a data frame with sorted information
+result_mh <- data.frame(
+  value = y_all_mh[order_idx],
+  list_pos = list_index[order_idx],   # which element of the list
+  vector_pos = vector_index[order_idx] # position within that vector
+)
+
+simout_list_mh <- simout_list
+X_list_mh <- X_list
+
+result_mh
+
+```
+
+```{r}
+nbest <- 50
+par(mfrow = c(1, 2))
+plot(0:100, ytrue_vec, ylim = c(0, 300))
+for (i in 1:nbest){
+  l <- result_flow[i, "list_pos"]
+  v <- result_flow[i, "vector_pos"]
+
+  lines(0:100, simout_list_flow[[l]][[v]]$n_SI, col = "grey", lty = 1)
+}
+points(0:100, ytrue_vec, pch = 19)
+
+plot(0:100, ytrue_vec, ylim = c(0, 300))
+for (i in 1:nbest){
+  l <- result_mh[i, "list_pos"]
+  v <- result_mh[i, "vector_pos"]
+
+  lines(0:100, simout_list[[l]][[v]]$n_SI, col = "grey", lty = 1)
+}
+points(0:100, ytrue_vec, pch = 19)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+boxplot(result_flow$value[1:nbest], ylim = c(-10, 2), main = paste0("FLOW adaptive nbest = ", nbest), ylab = "std RMSE")
+boxplot(result_mh$value[1:nbest], ylim = c(-4, 2), main = paste0("MH adaptive nbest = ", nbest), ylab = "std RMSE")
+```
+
+```{r}
+threshold <- -1
+
+# ---- Function to compute cumulative proportion ----
+get_cum_prop <- function(lst, threshold, method_name) {
+  vals <- unlist(lst, use.names = FALSE)
+  data.frame(
+    eval_num = seq_along(vals),
+    proportion_below = cumsum(vals <= threshold) / seq_along(vals),
+    method = method_name
+  )
+}
+
+df1 <- get_cum_prop(y_list_flow, threshold, "Flow")
+df2 <- get_cum_prop(y_list_mh, threshold, "MH")
+
+df_all <- rbind(df1, df2)
+
+# ---- Plot ----
+ggplot(df_all, aes(x = eval_num, y = proportion_below, color = method)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  ylim(0, 1) +
+  labs(
+    title = paste("Proportion of trajectories ≤", threshold),
+    x = "Budget",
+    y = "Cumulative Proportion Below Threshold",
+    color = "Method"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+get_cum_prop_iter <- function(lst, threshold, method_name) {
+  total_evals <- cumsum(lengths(lst))
+  cum_below <- cumsum(sapply(lst, function(x) sum(x <= threshold)))
+  data.frame(
+    total_evals = total_evals,
+    proportion_below = cum_below / total_evals,
+    method = method_name
+  )
+}
+
+df1_iter <- get_cum_prop_iter(y_list_flow, threshold, "Flow")
+df2_iter <- get_cum_prop_iter(y_list_mh, threshold, "MH")
+
+df_all_iter <- rbind(df1_iter, df2_iter)
+
+ggplot(df_all_iter, aes(x = total_evals, y = proportion_below, color = method)) +
+  geom_line(size = 1) +
+  geom_point() +
+  ylim(0, 1) +
+  labs(
+    title = paste("Comparison After Each BO Iteration – ≤", threshold),
+    x = "Total Number of Function Evaluations",
+    y = "Cumulative Proportion Below Threshold",
+    color = "Method"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+# ---- Helper Function ----
+make_df <- function(values_list, X_list, method_name, threshold) {
+  do.call(rbind, lapply(seq_along(values_list), function(i) {
+    df <- as.data.frame(X_list[[i]])              # convert matrix -> data frame
+    colnames(df) <- paste0("x", seq_len(ncol(df))) # ensure column names x1, x2, ...
+    df$value <- values_list[[i]]
+    df$below_threshold <- df$value <= threshold
+    df$method <- method_name
+    df
+  }))
+}
+
+df_all <- dplyr::bind_rows(
+  make_df(y_list_flow, X_list_flow, "Flow", threshold),
+  make_df(y_list_mh, X_list_mh, "MH", threshold)
+)
+
+head(df_all)
+
+ggplot(subset(df_all, below_threshold == TRUE), aes(x = x1, y = x2, color = method, shape = method)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(data = data.frame(x1 = ground_truth["x1"], x2 = ground_truth["x2"]),
+             aes(x = x1, y = x2),
+             color = "black", shape = 1, size = 5, inherit.aes = FALSE) +
+  labs(
+    title = paste("Candidate Points (Threshold =", threshold, ")"),
+    x = "x1", y = "x2",
+    color = paste("≤", threshold),
+    shape = "Method"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(ggplot2)
+
+thresholds <- c(-3, -1, 0)
+
+# ---- Function to compute cumulative proportions for any threshold ----
+get_cum_prop_multi <- function(lst, thresholds, method_name) {
+  vals <- unlist(lst, use.names = FALSE)
+  eval_num <- seq_along(vals)
+  
+  do.call(rbind, lapply(thresholds, function(th) {
+    data.frame(
+      eval_num = eval_num,
+      proportion_below = cumsum(vals <= th) / eval_num,
+      method = method_name,
+      threshold = paste0("≤ ", th)
+    )
+  }))
+}
+
+df_all <- rbind(
+  get_cum_prop_multi(y_list_flow, thresholds, "Flow"),
+  get_cum_prop_multi(y_list_mh, thresholds, "MH")
+)
+
+# ---- Plot with facets ----
+ggplot(df_all, aes(x = eval_num, y = proportion_below, color = method)) +
+  geom_line(size = 1) +
+  geom_point() +
+  ylim(0, 1) +
+  facet_wrap(~threshold) +
+  labs(
+    title = "Comparison of Methods Across Multiple Thresholds",
+    x = "Number of Function Evaluations",
+    y = "Cumulative Proportion Below Threshold",
+    color = "Method"
+  ) +
+  theme_minimal()
+
+```
+

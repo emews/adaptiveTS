@@ -25,14 +25,14 @@ from gpytorch.likelihoods import GaussianLikelihood
 
 
 class CustomGP(ExactGP,GPyTorchModel):
-    def __init__(self, train_inputs, train_targets, likelihood,num_tasks=11):
+    def __init__(self, train_inputs, train_targets, likelihood,num_tasks=10,rank = 10):
         super().__init__(train_inputs, train_targets, likelihood)
         self.mean_module = ConstantMean()
-        self.task_covariance_module = IndexKernel(num_tasks=num_tasks,rank=10)
+        self.task_covariance_module = IndexKernel(num_tasks=num_tasks,rank=rank)
         self.covar_module = MaternKernel(nu=2.5,active_dims=[0,1])
     def forward(self, x):
         X_continuous = x[:,0:2]
-        X_cat = x[:,-1].int()
+        X_cat = (x[:,-1] - 1).int() # categoricals must map to {0, ..., (N - 1)}
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(X_continuous) * self.task_covariance_module(X_cat)
         return MultivariateNormal(mean_x, covar_x)

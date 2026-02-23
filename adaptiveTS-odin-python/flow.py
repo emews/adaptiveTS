@@ -112,6 +112,9 @@ def train_and_sample(df, nsamples, seeds):
     out_df["r"] = r_decoded
     #out_df.to_csv(output_csv, index=False)
     #print(f"Generated samples saved to {output_csv}")
+    del flow
+    del optimizer
+    del loss
     return out_df
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

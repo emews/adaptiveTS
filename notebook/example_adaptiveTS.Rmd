@@ -1,0 +1,430 @@
+---
+title: "adaptiveTS 1-D example"
+output: html_document
+---
+
+```{r}
+
+source(paste0("../script/R/odin-sim.R"))
+source(paste0("../script/R/adaptive_TS.R"))
+
+## define 1_D input simulation function
+
+run_sim_err <- function(par){
+  
+  # mandatory inputs
+  # seed, params, param_bounds, nsteps, ytrue_vec
+  
+  # check if global random seed is present
+  if (exists(".Random.seed", .GlobalEnv))
+    oldseed <- .GlobalEnv$.Random.seed
+  else
+    oldseed <- NULL
+  
+  ## parse input
+  # parse_sim_arg(parlist)
+  npar <- length(par) # must be 2 for now
+  
+  beta_range <- c(0.2, 0.5)
+  gamma_range <- c(0.1, 0.4)
+  nsteps <- 100
+  sim_seed <- par[2]
+  
+  set.seed(sim_seed)
+  beta <- beta_range[1] + par[1] * diff(range(beta_range))
+  gamma <- gamma_range[1] + 0.35 * diff(range(gamma_range))
+  
+  ## simulate
+  model <- stoch_SIR_odin$new(S_ini = 10000, I_ini = 20,
+                              beta = beta, gamma = gamma)
+  out <- data.frame(model$run(step = 0:nsteps))
+  
+  ## standardize the output
+  
+  # restore random seed
+  if (!is.null(oldseed)) 
+    .GlobalEnv$.Random.seed <- oldseed
+  else
+    rm(".Random.seed", envir = .GlobalEnv)
+  
+  return(list(out=sum((out$n_SI - ytrue_vec)^2), res=out))
+}
+```
+
+```{r}
+create_grid_CRNGP <- function(nparam, nrep, model, ref, err_sig, prop_sig = 0.3){
+  
+  p <- ncol(model$X0)  # input dimension
+  
+  # lhs design to initialize
+  s <- 1:nrep
+  Xgrid_01 <- lhs::randomLHS(n = nparam, k = p)
+  Xsgrid_01 <- cbind(Xgrid_01[rep(1:nparam, each = nrep), ], rep(s, nparam))
+  
+  # calculate importance weights
+  w <- loglik_design(newX = Xsgrid_01, model = model, ytrue = ref, err_sig = err_sig)
+  w_prime <-  w - max(w)
+  w_norm <- exp(w_prime) / sum(exp(w_prime))
+  
+  # desnify
+  xsgrid_new <- c()
+  xsgrid_all <- c()
+  xsgrid_id <- c()
+  
+  acc_prop <- c()
+  
+  k <- 1
+  while(nrow(xsgrid_new) < (nparam*nrep) || is.null(nrow(xsgrid_new))){
+    
+    grid_id <- sample(1:nrow(Xsgrid_01), 1, prob = w_norm, replace = T)
+    
+    if(nrow(xsgrid_new) < (nparam*nrep) || is.null(nrow(xsgrid_new))) {
+      # old candidate
+      xs_old <- Xsgrid_01[grid_id, ]
+      # proposal
+      xs_can <- rnorm(p, xs_old[1:p], prop_sig)
+      # nrep_can <- sample.int(nrep, 1)
+      xs_can_mat <- cbind(matrix(rep(xs_can, each = nrep), nrow = nrep), 1:nrep)
+      
+      # acceptance probability
+      if((all(xs_can[1:p] < 1)) & ((all(xs_can[1:p] > 0)))){
+        acc_prob <- loglik_design(xs_can_mat, model = model,
+                                  ref, err_sig) - w[ii]
+        u <- log(runif(nrep))
+        
+        # print(length(u))
+        # print(length(acc_prob))
+        
+        selected_ids <- which(u < acc_prob)
+        if(length(selected_ids) > 0){
+          selected_id <- sort(sample(selected_ids, ceiling(length(selected_ids)/2)))
+          xsgrid_new <- rbind(xsgrid_new, xs_can_mat[selected_id, ])
+          xsgrid_all <- rbind(xsgrid_all, xs_can_mat)
+          xsgrid_id <- c(xsgrid_id, selected_id + (k-1)*20)
+        }
+        k <- k + 1
+        acc_prop <- c(acc_prop, 1)
+      } else {
+        acc_prop <- c(acc_prop, 0)
+      }
+    }
+  }
+  
+  return(list(xsgrid_new, xsgrid_all, xsgrid_id))
+}
+```
+
+### Adaptive BO settings and ground truth
+
+```{r}
+
+exp_seed <- 1626
+init_npar <- 5
+nrep <- 3
+sim_budget <- 100
+grid_npar <- 10
+nTS_samp <- 5
+GP_type <- "CRNGP"
+err_sig <- 0.5
+prop_sig <- 0.3
+
+## Create ground truth
+par_true <- c(0.45, 0.35, 3)
+# par_true <- c(0.3, 0.8, 50)
+# par_true <- c(0.7, 0.2, 50)
+xtrue <- par_true[1:2]
+strue <- par_true[3]
+ytrue <- run_sim(c(xtrue, strue))
+ytrue_full <- ytrue$n_SI
+ytrue_vec <- ytrue_full
+
+
+# user input
+# exp_path <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_1/"
+# exp_seed <- 23
+# init_npar <- 5
+# nrep <- 10
+# sim_budget <- 200
+# grid_npar <- 100
+# nTS_samp <- 30
+
+# # optional input
+# err_sig <- 0.5
+# prop_sig <- 0.3
+
+# fixed input for these experiments
+sim_func <- run_sim_err
+p <- 1
+ref <- -2
+```
+
+```{r}
+out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
+                                      grid_npar = grid_npar, nTS_samp = nTS_samp, 
+                                      ytrue = ytrue_full, ref = ref,
+                                      err_sig = err_sig, prop_sig = prop_sig, 
+                                      sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
+                                      adaptive = T, return_grid = TRUE)
+```
+
+
+```{r}
+plot(NA, xlim = c(0, 1), ylim = c(-3, 3))
+abline(v = out_adaptive_CRNGP$Xgrid_list[[1]][,1])
+abline(v = out_adaptive_CRNGP$Xgrid_list[[27]][,1], col = 3)
+# abline(v = out_adaptive_CRNGP$Xgrid_list[[6]][,1], col = 6)
+# abline(v = out_adaptive_CRNGP$Xgrid_list[[30]][,1], col = 2)
+# points()
+```
+
+```{r}
+set.seed(124)
+## =====================
+## initial design and simulations
+X_01 <- lhs::randomLHS(n = init_npar, k = p)
+X_01 <- matrix(seq(0.1, 0.9, length.out = init_npar), ncol = 1, nrow = init_npar)
+s <- 1:nrep
+Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
+
+## also create a dense grid for CRNGP prediction 
+X_pred_grid <- seq(0, 1, length.out = 100)
+Xs_pred_grid <- as.matrix(expand.grid(X_pred_grid, s))
+
+simouts <- list() # store full simulations so we don't have to re-run later in the analysis
+y <- rep(NA, init_npar*nrep)
+for (ii in 1:(init_npar*nrep)){
+  simout <- sim_func(Xs_01[ii,])
+  y[ii] <- simout$out
+  simouts[[ii]] <- simout$res
+}
+
+## =====================
+## standardize output
+y_std <- scale(log(y+1))
+ycenter <- attr(y_std, "scaled:center")
+ysd <- attr(y_std, "scaled:scale")
+
+
+## =====================
+## BO set up 
+Xs <- Xs_01
+Y <- y_std
+f <- fitGP(Xs, Y, GP_type = GP_type, known = list(beta0 = 0), 
+           covtype = "Matern5_2", 
+           noiseControl = list(g_bounds = c(0.0001, 1)))
+
+Y_grid_pred <- predict(f, Xs_pred_grid)
+
+no_of_sims <- length(y)
+X_list <- list()
+y_list <- list()
+simout_list <- list()
+ynative_list <- list()
+Xsgrid_list <- list()
+f_list <- list()
+Y_grid_pred_list <- list()
+
+X_list[[1]] <- Xs_01
+y_list[[1]] <- y_std
+simout_list[[1]] <- simouts
+ynative_list[[1]] <- y
+Xsgrid_list[[1]] <- Xs_01
+f_list[[1]] <- f
+Y_grid_pred_list[[1]] <- Y_grid_pred
+
+## 
+```
+
+### TS
+
+```{r}
+# TS starts here
+tt <- 2
+while(no_of_sims < sim_budget){
+# for (tt in 1:nTS_iter){
+  out <- next_eval_CRN(model = f,
+                       grid_npar = grid_npar,
+                       nrep = nrep,
+                       ref = ref,
+                       err_sig = err_sig,
+                       prop_sig = prop_sig,
+                       nTS_samp = nTS_samp,
+                       adaptive = T, 
+                       return_grid = T)
+  
+  xnew <- out[[2]]
+  Xsgrid <- out[[1]]
+  
+  if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
+  
+  ## evaluate new simulations 
+  ynew <- rep(NA, nrow(xnew))
+  simouts <- list()
+  for (ii in 1:nrow(xnew)){
+    simout <- sim_func(xnew[ii, ])
+    ynew[ii] <- simout$out
+    simouts[[ii]] <- simout$res
+  }
+  X_list[[tt]] <- xnew
+  y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+  ynative_list[[tt]] <- ynew
+  simout_list[[tt]] <- simouts
+  Xsgrid_list[[tt]] <- Xsgrid
+  
+  ## update surrogate
+  Xs <- rbind(Xs, xnew)
+  Y <- c(Y, y_list[[tt]])
+  f <- fitGP(Xs, Y, GP_type = GP_type, 
+             known = list(beta0 = 0), covtype = "Matern5_2",
+             noiseControl = list(g_bounds = c(0.0001, 1)))
+  
+  Y_grid_pred_list[[tt]] <- predict(f, Xs_pred_grid)
+  
+  no_of_sims <- no_of_sims + length(ynew)
+  
+  cat("iter = ", tt, "\n")
+  
+  tt <- tt + 1
+}
+```
+
+```{r}
+
+ii <= 10
+
+Y_grid_pred <- Y_grid_pred_list[[ii]]
+
+lower <- Y_grid_pred$mean - 1.96 * Y_grid_pred$sd2
+upper <- Y_grid_pred$mean + 1.96 * Y_grid_pred$sd2
+
+plot(X_list[[1]][,1], y_std, col = Xs[,2], ylim = c(-3, 3), pch = 19)
+lines(X_pred_grid, Y_grid_pred$mean[1:100])
+lines(X_pred_grid, Y_grid_pred$mean[101:200], col = 2)
+lines(X_pred_grid, Y_grid_pred$mean[201:300], col = 3)
+polygon(
+  c(X_pred_grid, rev(X_pred_grid)),
+  c(upper[1:100], rev(lower[1:100])),
+  col = rgb(0, 0, 0, alpha = 0.2),
+  border = NA
+)
+polygon(
+  c(X_pred_grid, rev(X_pred_grid)),
+  c(upper[101:200], rev(lower[101:200])),
+  col = rgb(1, 0, 0, alpha = 0.2),
+  border = NA
+)
+polygon(
+  c(X_pred_grid, rev(X_pred_grid)),
+  c(upper[201:300], rev(lower[201:300])),
+  col = rgb(0, 1, 0, alpha = 0.2),
+  border = NA
+)
+```
+
+
+```{r, fig.height=8, fig.width=6}
+
+PNG <- T
+if(PNG) png("example_BO.png", height = 8, width = 12, units = "in", res = 200)
+
+layout(matrix(c(1,2,9,
+                3,4,9,
+                5,6,9,
+                7,8,9), nrow=4, byrow=TRUE),
+       widths = c(1, 1, 0.35))
+
+cols <- c(
+  blue   = "#0072B2",
+  orange = "#D55E00",
+  green  = "#009E73"
+)
+
+pchs = c(15, 17, 19)
+
+par(mfrow = c(4, 2), mar = c(0, 0, 0, 0), oma = c(5, 5, 5, 15))
+
+k <- 1
+for (ii in c(1, 2, 13, 16)){
+
+  XX <- do.call(rbind, X_list[1:ii])
+  YY <- do.call(c, y_list[1:ii])
+  
+  plot(X_list[[ii]][, 1], y_list[[ii]], pch = pchs[X_list[[ii]][, 2]], col = cols[X_list[[ii]][, 2]], ylim = c(-3, 3), xlim = c(0, 1), 
+       cex = 1.5, axes = F)
+  abline(v = seq(0, 1, by = .1), h = seq(-3, 3, by = 1), col = "gray80", lty = 1, lwd = 0.5)
+  # abline(v = 0.45, col = "red", lty = 2, lwd = 2)
+  abline(v = Xsgrid_list[[ii]][, 1], col = alpha(cols[Xsgrid_list[[ii]][, 2]], 0.5))
+  box()
+  if(k %% 2 == 1) axis(2, at = seq(-3, 3, by = 1), cex.axis = 1.2)
+  if(k > 5) axis(1, at = seq(0, 1, by = .1),  cex.axis = 1.2)
+  
+  Y_grid_pred <- Y_grid_pred_list[[ii]]
+  lower <- Y_grid_pred$mean - 1.96 * sqrt(Y_grid_pred$sd2 + Y_grid_pred$nugs)
+  upper <- Y_grid_pred$mean + 1.96 * sqrt(Y_grid_pred$sd2 + Y_grid_pred$nugs)
+  
+  plot(XX[, 1], YY, col = cols[XX[,2]], ylim = c(-3, 3), xlim = c(0, 1), pch = pchs[XX[, 2]], cex = 1.5, axes = F)
+  abline(v = 0.45, col = "red", lty = 2, lwd = 1.5)
+  abline(v = seq(0, 1, by = .1), h = seq(-3, 3, by = 1), col = "gray80", lty = 1, lwd = 0.5)
+  polygon(
+    c(X_pred_grid, rev(X_pred_grid)),
+    c(upper[1:100], rev(lower[1:100])),
+    col = alpha(cols[1], 0.2),
+    border = NA
+  )
+  polygon(
+    c(X_pred_grid, rev(X_pred_grid)),
+    c(upper[101:200], rev(lower[101:200])),
+    col = alpha(cols[2], 0.2),
+    border = NA
+  )
+  polygon(
+    c(X_pred_grid, rev(X_pred_grid)),
+    c(upper[201:300], rev(lower[201:300])),
+    col =alpha(cols[3], 0.2),
+    border = NA
+  )
+  lines(X_pred_grid, Y_grid_pred_list$mean[1:100], col = cols[1], lwd = 1.5)
+  lines(X_pred_grid, Y_grid_pred$mean[101:200], col = cols[2])
+  lines(X_pred_grid, Y_grid_pred$mean[201:300], col = cols[3])
+  points(X_list[[1]][,1], y_std, col = cols[Xs[,2]], pch = pchs[X_list[[ii]][, 2]], cex = 1.5)
+  box()
+  if(k > 5) axis(1, at = seq(0, 1, by = .1), cex.axis = 1.2)
+
+  k <- k + 2
+}
+
+mtext("X", side = 1, outer = TRUE, line = 3, cex = 1.2)
+mtext("Y", side = 2, outer = TRUE, line = 3, cex = 1.2)
+mtext("Design", side = 3, outer = TRUE, line = 1, at = 0.25, cex = 1.2)
+mtext("CRNGP", side = 3, outer = TRUE, line = 1, at = 0.75, cex = 1.2)
+mtext("Iteration 1", side = 4, outer = TRUE, line = 1, at = 0.875, cex = 1.2)
+mtext("Iteration 2", side = 4, outer = TRUE, line = 1, at = 0.625, cex = 1.2)
+mtext("Iteration 13", side = 4, outer = TRUE, line = 1, at = 0.375, cex = 1.2)
+mtext("Iteration 16", side = 4, outer = TRUE, line = 1, at = 0.125, cex = 1.2)
+
+# --- common legend on the right (outside panels) ---
+par(fig = c(0, 1, 0, 1), new = TRUE, mar = c(0, 0, 0, 0), xpd = NA)
+plot.new()
+par(usr = c(0, 1, 0, 1))  # normalized coordinates
+
+legend(
+  x = 1.05, y = 0.5,              # 1.02 pushes it into the right outer margin
+  xjust = 0, yjust = 0.5,
+  legend = c("Replicate 1", "Replicate 2", "Replicate 3"),
+  col    = cols,
+  pch    = pchs,
+  lty    = 1,
+  lwd    = 2,
+  bty    = "n",
+  cex    = 1.5
+)
+
+if(PNG) dev.off()
+```
+
+```{r}
+for (ii in 5:30){
+plot(NA, xlim = c(0, 1), ylim = c(-3, 3), main = as.character(ii))
+abline(v = Xsgrid_list[[ii]][, 1], col = Xsgrid_list[[ii]][, 2])
+}
+```

@@ -1,4 +1,5 @@
 library(patchwork)
+library(ggplot2)
 
 collect_results <- function(out_list){
   x_mat <- do.call(rbind, out_list$X_list)
@@ -53,36 +54,11 @@ load5outputs <- function(experiment_id, exp_path, config){
               config=config[exp_id==experiment_id,]))
 }
 
-load_outputs_rdata <- function(experiment_id, exp_path, config){
-  outfile <- sprintf("%s/exp_%s_out.RData", exp_path, experiment_id)
-  # only want to load the relevant elements, not the entire workspace
-  temp_env <- new.env()
-  load(outfile, envir = temp_env)
-  out_fixed_CRNGP <- temp_env$out_fixed_CRNGP
-  out_adaptive_CRNGP <- temp_env$out_adaptive_CRNGP
-  out_fixed_hetGP <- temp_env$out_fixed_hetGP
-  out_adaptive_hetGP <- temp_env$out_adaptive_hetGP
-  out_adaptive_CRNGP_seed <- temp_env$out_adaptive_CRNGP_seed
-  
-  res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
-  res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
-  res_fixed_hetGP <- collect_results(out_fixed_hetGP)
-  res_adaptive_hetGP <- collect_results(out_adaptive_hetGP)
-  res_adaptive_CRNGP_seed <- collect_results(out_adaptive_CRNGP_seed)
-  
-  return(list(fixed_crn=res_fixed_CRNGP, 
-              adaptive_crn=res_adaptive_CRNGP, 
-              fixed_het=res_fixed_hetGP, 
-              adaptive_het=res_adaptive_hetGP,
-              fixed_crn_seed=res_adaptive_CRNGP_seed,
-              config=config[exp_id==experiment_id,]))
-}
-
 load_outputs <- function(experiment_id, exp_path, config){
   outfile <- sprintf("%s/exp_%s_out.rds", exp_path, experiment_id)
   # only want to load the relevant elements, not the entire workspace
   results_list <- readRDS(outfile)
-
+  
   res_fixed_CRNGP <- collect_results(out_fixed_CRNGP)
   res_adaptive_CRNGP <- collect_results(out_adaptive_CRNGP)
   res_fixed_hetGP <- collect_results(out_fixed_hetGP)
@@ -186,7 +162,7 @@ checkpointing_speed <- function(out_list,nout=4, n_trajectories=c(10, 25, 50), t
   return(do.call(rbind, all_results))
 }
 
-threshold_budget_analysis <- function(out_list, nout=5, thresholds=c(15, 20, 25, 30), show_plots=FALSE) {
+threshold_budget_analysis <- function(out_list, nout=4, thresholds=c(15, 20, 25, 30), show_plots=FALSE) {
   outs <- names(out_list)[1:nout]
   all_results <- list()
   budget_results <- list()
@@ -214,7 +190,6 @@ threshold_budget_analysis <- function(out_list, nout=5, thresholds=c(15, 20, 25,
   return(list(agg_auc=do.call(rbind, all_results),
               budget_df=budget_df))
 }
-
 
 analyze_experiment <- function(exp_id, exp_path, config, nout=5, thresholds=c(15, 20, 25, 30), n_trajectories=c(10, 25, 50)) {
   out_list <- load_outputs(exp_id, exp_path, config)

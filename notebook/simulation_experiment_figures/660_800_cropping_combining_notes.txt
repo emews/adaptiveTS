@@ -1,0 +1,5 @@
+# Can use Imagemagick to batch crop the 3D pngs for combining
+magick '*_660_800.png' -set filename:fn '%[basename]_cropped' '-crop' '736x742+290+210' '%[filename:fn].png'
+
+# Then combine in the desired order
+montage -mode concatenate -tile 3x2  fgCRN_660_800_cropped.png fHet_660_800_cropped.png aCRN_660_800_cropped.png initial_design_660_800_cropped.png fCRN_660_800_cropped.png aHet_660_800_cropped.png all_combined_660_800_cropped.png

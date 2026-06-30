@@ -1,6 +1,6 @@
 #### IMPROV #### 
 db_path: /lcrc/project/EMEWS/improv/ncollier/dbs/snl_db
-db_host: ilogin4.lcrc.anl.gov
+db_host: ilogin1.lcrc.anl.gov
 db_user: eqsql_user
 db_name: EQSQL
 db_port: 54321
@@ -29,10 +29,11 @@ python_path: /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.
 #### COMMON ####
 
 worker_pool_id: default
-task_type: 1001
+task_type: 99999
 gt_h_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/dt.chicago.hosp.csv
 gt_d_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/dt.chicago.deaths.csv
 priors_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/data/calibration_targets/priors.csv
 ts_r_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/R/adaptiveTS_citycovid.R
+exp_design_file: /lcrc/project/EMEWS/improv/ncollier/repos/adaptiveTS/emews/R/exp_design.R
 
 

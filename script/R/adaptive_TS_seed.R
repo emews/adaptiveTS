@@ -100,14 +100,17 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
   s <- 1:nrep
   Xs_01 <- cbind(X_01[rep(1:init_npar, each = nrep), ], rep(s, init_npar))
   
+  simouts <- list() # store full simulations so we don't have to re-run later in the analysis
   y <- rep(NA, init_npar*nrep)
   for (ii in 1:(init_npar*nrep)){
-    y[ii] <- sim_func(Xs_01[ii, ])
+    simout <- sim_func(Xs_01[ii,])
+    y[ii] <- simout$out
+    simouts[[ii]] <- simout$res
   }
   
   ## =====================
   ## standardize output
-  y_std <- scale(log(y))
+  y_std <- scale(log(y+1))
   ycenter <- attr(y_std, "scaled:center")
   ysd <- attr(y_std, "scaled:scale")
   
@@ -122,10 +125,12 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
   no_of_sims <- length(y)
   X_list <- list()
   y_list <- list()
+  simout_list <- list()
   ynative_list <- list()
   
   X_list[[1]] <- Xs_01
   y_list[[1]] <- y_std
+  simout_list[[1]] <- simouts
   ynative_list[[1]] <- y
   
   # ================================
@@ -156,13 +161,17 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
       
       ## evaluate new simulations 
       ynew <- rep(NA, nrow(xnew))
+      simouts <- list()
       
       for (ii in 1:nrow(xnew)){
-        ynew[ii] <- sim_func(xnew[ii, ])
+        simout <- sim_func(xnew[ii, ])
+        ynew[ii] <- simout$out
+        simouts[[ii]] <- simout$res
       }
       X_list[[tt]] <- xnew
-      y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+      y_list[[tt]] <- (log(ynew+1) - ycenter) / ysd
       ynative_list[[tt]] <- ynew
+      simout_list[[tt]] <- simouts
       
       ## update surrogate
       Xs <- rbind(Xs, xnew)
@@ -179,7 +188,7 @@ TSBatchBO_CRNGP_seed <- function(init_npar,
     }
   }
   
-  return(list(X_list, y_list, ynative_list))
+  return(list("X_list"=X_list, "y_list"=y_list, "ynative_list"=ynative_list, "simout_list"=simout_list))
   
   # return(f)
   

@@ -159,7 +159,7 @@ TSBatchBO_hetGP <- function(init_npar,
   
   ## =====================
   ## standardize output
-  y_std <- scale(log(y))
+  y_std <- scale(log(y+1))
   ycenter <- attr(y_std, "scaled:center")
   ysd <- attr(y_std, "scaled:scale")
   
@@ -215,7 +215,7 @@ TSBatchBO_hetGP <- function(init_npar,
         simouts[[ii]] <- simout$res
       }
       X_list[[tt]] <- xnew
-      y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+      y_list[[tt]] <- (log(ynew+1) - ycenter) / ysd
       ynative_list[[tt]] <- ynew
       simout_list[[tt]] <- simouts
       

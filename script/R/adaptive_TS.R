@@ -187,6 +187,7 @@ TSBatchBO_CRNGP <- function(init_npar,
                             GP_type = "CRNGP",
                             sim_func,
                             exp_seed = NULL,
+                            return_grid = FALSE,
                             ...){
   
   
@@ -210,7 +211,7 @@ TSBatchBO_CRNGP <- function(init_npar,
   
   ## =====================
   ## standardize output
-  y_std <- scale(log(y))
+  y_std <- scale(log(y+1))
   ycenter <- attr(y_std, "scaled:center")
   ysd <- attr(y_std, "scaled:scale")
   
@@ -226,11 +227,13 @@ TSBatchBO_CRNGP <- function(init_npar,
   y_list <- list()
   simout_list <- list()
   ynative_list <- list()
+  if(return_grid) Xgrid_list <- list()
   
   X_list[[1]] <- Xs_01
   y_list[[1]] <- y_std
   simout_list[[1]] <- simouts
   ynative_list[[1]] <- y
+  if(return_grid) Xgrid_list[[1]] <- Xs_01
   
   # ================================
   # fixed grid for non-adaptive case
@@ -267,7 +270,7 @@ TSBatchBO_CRNGP <- function(init_npar,
         simouts[[ii]] <- simout$res
       }
       X_list[[tt]] <- xnew
-      y_list[[tt]] <- (log(ynew) - ycenter) / ysd
+      y_list[[tt]] <- (log(ynew + 1) - ycenter) / ysd
       ynative_list[[tt]] <- ynew
       simout_list[[tt]] <- simouts
       
@@ -299,9 +302,15 @@ TSBatchBO_CRNGP <- function(init_npar,
                            err_sig = err_sig,
                            prop_sig = prop_sig,
                            nTS_samp = nTS_samp,
-                           adaptive = T)
+                           adaptive = T, 
+                           return_grid = return_grid)
       
-      xnew <- out
+      if(return_grid){
+        xnew <- out[[2]]
+        Xgrid <- out[[1]]
+      } else{
+        xnew <- out
+      }
       if(!is.matrix(xnew)) xnew <- matrix(xnew, nrow = 1)
       
       ## evaluate new simulations 
@@ -316,6 +325,7 @@ TSBatchBO_CRNGP <- function(init_npar,
       y_list[[tt]] <- (log(ynew) - ycenter) / ysd
       ynative_list[[tt]] <- ynew
       simout_list[[tt]] <- simouts
+      if(return_grid) Xgrid_list[[tt]] <- Xgrid
       
       ## update surrogate
       Xs <- rbind(Xs, xnew)
@@ -331,8 +341,13 @@ TSBatchBO_CRNGP <- function(init_npar,
     }
   }
   
-  return(list("X_list"=X_list, "y_list"=y_list, "ynative_list"=ynative_list, "simout_list"=simout_list))
-  
+  if(return_grid) {
+    return(list("X_list"=X_list, "y_list"=y_list, "ynative_list"=ynative_list, 
+                "simout_list"=simout_list,
+                "Xgrid_list" = Xgrid_list))
+  } else {
+    return(list("X_list"=X_list, "y_list"=y_list, "ynative_list"=ynative_list, "simout_list"=simout_list))
+  }
   # return(f)
   
 }
@@ -443,7 +458,8 @@ adaptive_CRN_TS <- function(model,
                             ref,
                             err_sig,
                             prop_sig,
-                            nTS_samp){
+                            nTS_samp,
+                            return_grid = FALSE){
   
   ## create grid
   grid <- create_grid_CRNGP(grid_npar, 
@@ -461,8 +477,13 @@ adaptive_CRN_TS <- function(model,
   tTS <- MASS::mvrnorm(n = nTS_samp, 
                        mu = pred$mean, Sigma = 1/2 * (pred$cov + t(pred$cov)))
   
+  if(!is.matrix(tTS)) tTS <- matrix(tTS, nrow = 1)
   best_ids <- apply(tTS, 1, which.min)
   best_ids <- unique(best_ids)
+  
+  if(return_grid){
+    return(list(Xsgrid, Xsgrid[best_ids, ]))
+  }
   
   return(Xsgrid[best_ids, ])
 }

@@ -1,10 +1,15 @@
 
-BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/"
+# BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_gt_beta0.3_gamma0.8_seed50/"
+BASE_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/experiments/exp_gt_beta0.3_gamma0.8_seed50/"
 
-exp_seed <- 1:5
+if (!dir.exists(BASE_DIR)) {
+  dir.create(BASE_DIR)
+}
+
+exp_seed <- 1:10
 init_npar <- c(5, 10)
 nrep <- c(10, 20)	
-sim_budget <- c(200, 500, 700)	
+sim_budget <- c(700)	
 grid_npar <- c(100, 200, 300)	
 nTS_samp <- c(10, 20, 30)
 
@@ -16,4 +21,7 @@ d_eff$exp_id <- paste0("exp_", 1:nrow(d_eff))
 
 d_eff <- d_eff[, c(7, 1:6)]
 d_eff$exp_path <- paste0(BASE_DIR, d_eff$exp_id, "/")
-write.csv(d_eff, file = "../../experiments/config.csv", row.names = F)
+
+UPF_DIR <- "/lcrc/project/EMEWS/afadikar/git/adaptiveTS/emews/data/upfs/"
+
+write.csv(d_eff, file = paste0(UPF_DIR, "config_gt_beta0.3_gamma0.8_seed50.csv"), row.names = F)

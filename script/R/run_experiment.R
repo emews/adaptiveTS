@@ -61,7 +61,9 @@ err_sig <- args$err_sig
 prop_sig <- args$prop_sig
 
 ## Create ground truth
-par_true <- c(0.45, 0.35, 50)
+# par_true <- c(0.45, 0.35, 50)
+par_true <- c(0.3, 0.8, 50)
+# par_true <- c(0.7, 0.2, 50)
 xtrue <- par_true[1:2]
 strue <- par_true[3]
 ytrue <- run_sim(c(xtrue, strue))
@@ -90,12 +92,17 @@ ref <- -2
 ## =================================================
 ## run BO
 
+doSAVE_ind <- FALSE
+
 out_fixed_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
                                    grid_npar = grid_npar, nTS_samp = nTS_samp, 
                                    ytrue = ytrue_full, ref = ref,
                                    err_sig = err_sig, prop_sig = prop_sig, 
                                    sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
                                    adaptive = F)
+
+if(doSAVE_ind) save(out_fixed_CRNGP, 
+                    file = paste0(exp_path, "/", args$exp_id, "_", "out_fixed_CRNGP.RData"))
 
 out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budget, 
                                       grid_npar = grid_npar, nTS_samp = nTS_samp, 
@@ -104,12 +111,17 @@ out_adaptive_CRNGP <- TSBatchBO_CRNGP(init_npar, nrep, p, sim_budget = sim_budge
                                       sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
                                       adaptive = T)
 
+if(doSAVE_ind) save(out_adaptive_CRNGP,
+                    file = paste0(exp_path, "/", args$exp_id, "_", "out_adaptive_CRNGP.RData"))
+
 out_fixed_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
                                    grid_npar = grid_npar, nTS_samp = nTS_samp, 
                                    ytrue = ytrue_full, ref = ref,
                                    err_sig = err_sig, prop_sig = prop_sig, 
                                    sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
                                    adaptive = F)
+if(doSAVE_ind) save(out_fixed_hetGP, 
+                    file = paste0(exp_path, "/", args$exp_id, "_", "out_fixed_hetGP.RData"))
 
 out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budget, 
                                       grid_npar = grid_npar, nTS_samp = nTS_samp, 
@@ -117,6 +129,8 @@ out_adaptive_hetGP <- TSBatchBO_hetGP(init_npar, nrep, p, sim_budget = sim_budge
                                       err_sig = err_sig, prop_sig = prop_sig, 
                                       sim_func = run_sim_err, exp_seed = exp_seed, covtype = "Matern5_2",
                                       adaptive = T)
+if(doSAVE_ind) save(out_adaptive_hetGP, 
+                    file = paste0(exp_path, "/", args$exp_id, "_", "out_adaptive_hetGP.RData"))
 
 out_adaptive_CRNGP_seed <- TSBatchBO_CRNGP_seed(init_npar, nrep, p, 
                                                 sim_budget = sim_budget, 
@@ -127,4 +141,17 @@ out_adaptive_CRNGP_seed <- TSBatchBO_CRNGP_seed(init_npar, nrep, p,
                                                 exp_seed = exp_seed, 
                                                 covtype = "Matern5_2")
 
-save.image(file = paste0(exp_path, "/", args$exp_id, "_", "out.RData"))
+if(doSAVE_ind) save(out_adaptive_CRNGP_seed, 
+                    file = paste0(exp_path, "/", args$exp_id, "_", "out_adaptive_CRNGP_seed.RData"))
+
+# save.image(file = paste0(exp_path, "/", args$exp_id, "_", "out.RData"))
+
+results_list <- list(
+  out_fixed_CRNGP = out_fixed_CRNGP,
+  out_adaptive_CRNGP = out_adaptive_CRNGP,
+  out_fixed_hetGP = out_fixed_hetGP,
+  out_adaptive_hetGP = out_adaptive_hetGP,
+  out_adaptive_CRNGP_seed = out_adaptive_CRNGP_seed
+)
+
+saveRDS(results_list, file = paste0(exp_path, "/", args$exp_id, "_out.rds"))
